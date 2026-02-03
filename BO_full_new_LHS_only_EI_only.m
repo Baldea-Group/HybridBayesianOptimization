@@ -134,7 +134,7 @@ for t = 1:n_iter
     % Moderately exploratory xi schedule
     % xi0 = 0.5; 
     % xi  = max(0.10, xi0 * (0.98^(t-1)));
-    xi = 0; 
+    xi = 0.1; 
     EI  = expected_improvement_with_xi(mu_c, s_c, best_y, xi);
 
     % ---- Argmax EI ----
@@ -234,7 +234,7 @@ if doPlot
         Xs = repmat(ref, numel(xx), 1);  Xs(:,k) = xx;
         [mu, s2] = predict(gprMdl, toUnit(Xs));
         s = sqrt(max(s2,0));
-        EIplot = expected_improvement_with_xi(mu, s, f_best, 0.10);
+        EIplot = expected_improvement_with_xi(mu, s, f_best, 0.0);
 
         subplot(2,5, k);  hold on; grid on;
         fill([xx; flipud(xx)], [mu-2*s; flipud(mu+2*s)], [0.88 0.88 0.88], 'EdgeColor','none');
@@ -575,4 +575,5 @@ if ~isempty(filename)
     fprintf('LaTeX table written to %s\n', filename);
 end
 end
+
 
