@@ -210,7 +210,7 @@ if doPlot
         Xs = repmat(mid, numel(xx), 1);  Xs(:,k) = xx;
         [mu, s2] = predict(gprMdl, toUnit(Xs));
         s = sqrt(max(s2,0));
-        EIplot = expected_improvement_with_xi(mu, s, f_best, 0.10);
+        EIplot = expected_improvement_with_xi(mu, s, f_best, 0.0);
 
         subplot(2,5,k); hold on; grid on;
         fill([xx; flipud(xx)], [mu-2*s; flipud(mu+2*s)], [0.88 0.88 0.88], 'EdgeColor','none');
@@ -278,7 +278,7 @@ if doPlot
 
         [mu, s2] = predict(gprMdl, toUnit(Xs));
         s = sqrt(max(s2,0));
-        EIplot = expected_improvement_with_xi(mu, s, f_best, 0.10);
+        EIplot = expected_improvement_with_xi(mu, s, f_best, 0.0);
 
         % ---- Top tile: μ ± 2σ ----
         ax1 = nexttile(tile(base_row, col)); 
@@ -330,7 +330,7 @@ if doPlot
         [mu, s2] = predict(gprMdl, toUnit(Xs));
         s = sqrt(max(s2,0));
 
-        xi = 0.10;
+        xi = 0.0;
         EIplot = expected_improvement_with_xi(mu, s, f_best, xi);
 
         ax = nexttile; hold(ax,'on'); grid(ax,'on');
@@ -575,3 +575,4 @@ if ~isempty(filename)
     fprintf('LaTeX table written to %s\n', filename);
 end
 end
+
