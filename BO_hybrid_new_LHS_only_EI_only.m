@@ -109,7 +109,7 @@ for t = 1:n_iter
 
     % ===== Pure EI acquisition (no fallbacks) =====
     f_best = max(yc);   % current best observed yield
-    xi     = 0.0;       % no extra exploration offset
+    xi     = 0.1;       % 0.1 extra exploration offset
     EI     = expected_improvement_with_xi(mu_c, s_c, f_best, xi);
 
     [EImax, idx] = max(EI);
@@ -405,7 +405,7 @@ Xs_real  = [EE(:), DD(:)];
 Xs_norm  = normC(Xs_real);
 
 [mu, s]  = gpr_predict(gprMdl, Xs_norm);
-EI       = expected_improvement_with_xi(mu, s, max(yc), 0.05);
+EI       = expected_improvement_with_xi(mu, s, max(yc), 0.0);
 
 MU   = reshape(mu, size(EE));
 SIG  = reshape(s,  size(EE));
@@ -456,7 +456,7 @@ for k = 1:2
     Xs = normC(Xs_real);
 
     [mu, s] = gpr_predict(gprMdl, Xs);
-    EI      = expected_improvement_with_xi(mu, s, f_best, 0.05);
+    EI      = expected_improvement_with_xi(mu, s, f_best, 0.0);
 
     subplot(2,2,k); hold on; grid on;
     fill([gridk; flipud(gridk)], [mu-2*s; flipud(mu+2*s)], [0.85 0.85 0.85], 'EdgeColor','none');
@@ -485,7 +485,7 @@ figure(gcf); % use current figure
 set(gcf, 'Units','inches', 'Position',[1 1 fig_w_in fig_h_in]);
 t = tiledlayout(nRows, nCols, 'TileSpacing','compact', 'Padding','compact');
 
-xi_used = 0.10;
+xi_used = 0.0;
 series  = cell(2,1);
 
 for k = 1:2
@@ -591,3 +591,4 @@ end
 function s = tern(cond, a, b)
 if cond, s = a; else, s = b; end
 end
+
