@@ -348,6 +348,25 @@ def create_gp(
     )
 
 
+def _normalize_inputs(X: np.ndarray, x_lower: np.ndarray, x_upper: np.ndarray) -> np.ndarray:
+    """Normalize inputs to [0, 1]^d, matching MATLAB toUnit transform."""
+    ranges = x_upper - x_lower
+    ranges = np.where(ranges < 1e-12, 1.0, ranges)  # avoid division by zero
+    return (X - x_lower) / ranges
+
+
+def _adaptive_penalty(Y_feasible: np.ndarray, sign: float) -> float:
+    """Compute an adaptive penalty based on observed objective range.
+
+    Returns a penalty large enough to discourage infeasible points
+    but small enough not to destroy the GP surrogate.
+    """
+    if len(Y_feasible) == 0:
+        return 10.0  # fallback before any feasible points seen
+    y_range = np.ptp(Y_feasible)  # max - min of GP-space feasible values
+    return max(10.0, 3.0 * y_range)
+
+
 # =============================================================================
 # Solver 1: Black-box NLP
 # =============================================================================
@@ -451,7 +470,7 @@ def solve_blackbox_bo(
     problem: BiLevelProblem,
     n_iterations: int = 50,
     n_initial: int = 5,
-    penalty: float = 1e6,
+    penalty: float = None,
     acquisition: str = 'ei',
     kernel_type: str = 'rbf',
     seed: int = 42,
@@ -493,6 +512,7 @@ def solve_blackbox_bo(
     has_constraints = problem.g is not None and problem.n_g > 0
     maximize = problem.maximize
     n_total = n_initial + n_iterations
+    use_adaptive_penalty = penalty is None
 
     # For GP training, we always minimize (negate for maximization problems)
     sign = -1.0 if maximize else 1.0
@@ -502,22 +522,24 @@ def solve_blackbox_bo(
     Y_sample = []  # Values for GP (sign-adjusted and penalized)
     Y_true = []    # True objective values
     G_sample = []  # Constraint values
+    Y_feasible_gp = []  # GP-space values for feasible points (for adaptive penalty)
 
-    def penalized_objective(J_val, g_val):
+    def penalized_objective(J_val, g_val, current_penalty):
         """Apply penalty if constraints violated."""
         y = sign * J_val  # Convert to minimization for GP
         if g_val is None or len(g_val) == 0:
             return y
         max_violation = np.max(g_val)
         if max_violation > 0:
-            return y + penalty
+            return y + current_penalty
         return y
 
     if verbose:
         print(f"Black-box BO optimization of {problem.name}")
         print(f"  Acquisition function: {acquisition.upper()}")
         if has_constraints:
-            print(f"  Problem has {problem.n_g} constraints (penalty={penalty})")
+            pen_str = "adaptive" if use_adaptive_penalty else f"{penalty}"
+            print(f"  Problem has {problem.n_g} constraints (penalty={pen_str})")
         print(f"  Generating {n_initial} initial samples (LHS)...")
 
     # Initial sampling using Latin Hypercube Sampling
@@ -530,14 +552,30 @@ def solve_blackbox_bo(
         X_sample.append(x)
         Y_true.append(J_val)
         G_sample.append(g_val if has_constraints else np.array([]))
-        Y_sample.append(penalized_objective(J_val, g_val))
+        y_gp = sign * J_val
+        is_feas = (g_val is None or len(g_val) == 0 or np.max(g_val) <= 1e-6)
+        if is_feas:
+            Y_feasible_gp.append(y_gp)
+        # Temporarily store un-penalized GP value; we'll compute penalties after
+        Y_sample.append(y_gp)
+
+    # Compute adaptive penalty from initial feasible points and re-penalize
+    if use_adaptive_penalty:
+        penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
+    Y_sample_recomputed = []
+    for i_init in range(len(X_sample)):
+        g_val = G_sample[i_init]
+        y_gp = sign * Y_true[i_init]
+        if has_constraints and len(g_val) > 0 and np.max(g_val) > 0:
+            y_gp += penalty
+        Y_sample_recomputed.append(y_gp)
 
     X_sample = np.array(X_sample)
-    Y_sample = np.array(Y_sample)
+    Y_sample = np.array(Y_sample_recomputed)
     Y_true = np.array(Y_true)
     G_sample = np.array(G_sample) if has_constraints else None
 
-    # GP setup
+    # GP setup — fit in normalized [0,1]^d space
     gpr = create_gp(kernel_type=kernel_type, n_dim=n_x)
 
     # Track per-iteration timing
@@ -549,16 +587,25 @@ def solve_blackbox_bo(
     for i in range(n_iterations):
         iter_start = time.perf_counter()
 
-        # Fit GP with error handling
+        # Normalize inputs to [0,1]^d for GP fitting
+        X_norm = _normalize_inputs(X_sample, x_lower, x_upper)
+
+        # Fit GP on normalized inputs with error handling
         try:
-            gpr.fit(X_sample, Y_sample)
+            gpr.fit(X_norm, Y_sample)
         except (np.linalg.LinAlgError, ValueError) as e:
             if verbose:
                 print(f"    Warning: GP fitting failed at iteration {i+1}: {e}")
                 print(f"    Falling back to random sampling for this iteration.")
             x_next = rng.uniform(x_lower, x_upper)
             J_next, g_next = problem.evaluate_blackbox_with_constraints(x_next)
-            y_penalized = penalized_objective(J_next, g_next)
+            y_gp_next = sign * J_next
+            is_feas = not has_constraints or len(g_next) == 0 or np.max(g_next) <= 1e-6
+            if is_feas:
+                Y_feasible_gp.append(y_gp_next)
+                if use_adaptive_penalty:
+                    penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
+            y_penalized = penalized_objective(J_next, g_next, penalty)
             X_sample = np.vstack([X_sample, x_next])
             Y_sample = np.append(Y_sample, y_penalized)
             Y_true = np.append(Y_true, J_next)
@@ -578,11 +625,13 @@ def solve_blackbox_bo(
             kappa=kappa
         )
 
-        # Grid search for next point with error handling
+        # Grid search for next point in normalized space with error handling
         try:
-            X_grid = rng.uniform(x_lower, x_upper, size=(1000, n_x))
-            acq_values = acq_func(X_grid, gpr, np.min(Y_sample))
-            x_next = X_grid[np.argmax(acq_values)]
+            X_grid_norm = rng.uniform(0.0, 1.0, size=(1000, n_x))
+            acq_values = acq_func(X_grid_norm, gpr, np.min(Y_sample))
+            best_norm = X_grid_norm[np.argmax(acq_values)]
+            # Convert back to original space
+            x_next = x_lower + best_norm * (x_upper - x_lower)
         except (np.linalg.LinAlgError, ValueError) as e:
             if verbose:
                 print(f"    Warning: Acquisition optimization failed at iteration {i+1}: {e}")
@@ -591,7 +640,13 @@ def solve_blackbox_bo(
 
         # Evaluate
         J_next, g_next = problem.evaluate_blackbox_with_constraints(x_next)
-        y_penalized = penalized_objective(J_next, g_next)
+        y_gp_next = sign * J_next
+        is_feas = not has_constraints or len(g_next) == 0 or np.max(g_next) <= 1e-6
+        if is_feas:
+            Y_feasible_gp.append(y_gp_next)
+            if use_adaptive_penalty:
+                penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
+        y_penalized = penalized_objective(J_next, g_next, penalty)
 
         # Update samples
         X_sample = np.vstack([X_sample, x_next])
@@ -684,7 +739,7 @@ def solve_bilevel_bo(
     n_iterations: int = 50,
     n_initial: int = 5,
     n_inner_starts: int = 20,
-    penalty: float = 1e6,
+    penalty: float = None,
     acquisition: str = 'ei',
     kernel_type: str = 'rbf',
     seed: int = 42,
@@ -725,6 +780,7 @@ def solve_bilevel_bo(
     has_constraints = problem.g is not None and problem.n_g > 0
     maximize = problem.maximize
     n_total = n_initial + n_iterations
+    use_adaptive_penalty = penalty is None
 
     # For GP training, we always minimize
     sign = -1.0 if maximize else 1.0
@@ -736,6 +792,7 @@ def solve_bilevel_bo(
     Y_true = []        # True objective
     G_sample = []      # Constraint values at optimal x_wb
     Feasible = []      # Whether inner solution is feasible
+    Y_feasible_gp = [] # GP-space values for feasible points (for adaptive penalty)
 
     def check_feasibility(x_wb, pi):
         """Check if solution satisfies constraints."""
@@ -749,7 +806,8 @@ def solve_bilevel_bo(
         print(f"Bi-level BO optimization of {problem.name}")
         print(f"  Acquisition function: {acquisition.upper()}")
         if has_constraints:
-            print(f"  Problem has {problem.n_g} constraints (penalty={penalty})")
+            pen_str = "adaptive" if use_adaptive_penalty else f"{penalty}"
+            print(f"  Problem has {problem.n_g} constraints (penalty={pen_str})")
         print(f"  Generating {n_initial} initial samples (LHS)...")
 
     # Initial sampling using Latin Hypercube Sampling
@@ -772,19 +830,29 @@ def solve_bilevel_bo(
         G_sample.append(g_val if has_constraints else np.array([]))
         Feasible.append(is_feas)
 
-        # GP value (penalize if infeasible)
         y_gp = sign * J_val
-        if not is_feas:
-            y_gp += penalty
+        if is_feas:
+            Y_feasible_gp.append(y_gp)
+        # Store un-penalized for now; penalties applied after initial loop
         Y_sample.append(y_gp)
 
+    # Compute adaptive penalty from initial feasible points and re-penalize
+    if use_adaptive_penalty:
+        penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
+    Y_sample_recomputed = []
+    for i_init in range(len(X_bb_sample)):
+        y_gp = sign * Y_true[i_init]
+        if not Feasible[i_init]:
+            y_gp += penalty
+        Y_sample_recomputed.append(y_gp)
+
     X_bb_sample = np.array(X_bb_sample)
-    Y_sample = np.array(Y_sample)
+    Y_sample = np.array(Y_sample_recomputed)
     Y_true = np.array(Y_true)
     G_sample = np.array(G_sample) if has_constraints else None
     Feasible = np.array(Feasible)
 
-    # GP setup
+    # GP setup — fit in normalized [0,1]^d space
     gpr = create_gp(kernel_type=kernel_type, n_dim=problem.n_x_bb)
 
     # Track per-iteration timing
@@ -793,17 +861,23 @@ def solve_bilevel_bo(
     if verbose:
         print(f"  Running {n_iterations} BO iterations...")
 
+    bb_lower = problem.x_bb_lower
+    bb_upper = problem.x_bb_upper
+
     for i in range(n_iterations):
         iter_start = time.perf_counter()
 
-        # Fit GP with error handling
+        # Normalize inputs to [0,1]^d for GP fitting
+        X_bb_norm = _normalize_inputs(X_bb_sample, bb_lower, bb_upper)
+
+        # Fit GP on normalized inputs with error handling
         try:
-            gpr.fit(X_bb_sample, Y_sample)
+            gpr.fit(X_bb_norm, Y_sample)
         except (np.linalg.LinAlgError, ValueError) as e:
             if verbose:
                 print(f"    Warning: GP fitting failed at iteration {i+1}: {e}")
                 print(f"    Falling back to random sampling for this iteration.")
-            x_bb_next = rng.uniform(problem.x_bb_lower, problem.x_bb_upper)
+            x_bb_next = rng.uniform(bb_lower, bb_upper)
             J_next, x_wb_next = problem.evaluate_bilevel(
                 x_bb_next, n_starts=n_inner_starts, rng=rng, return_x_wb=True
             )
@@ -816,6 +890,10 @@ def solve_bilevel_bo(
             if has_constraints:
                 G_sample = np.vstack([G_sample, g_next])
             y_gp = sign * J_next
+            if is_feas:
+                Y_feasible_gp.append(y_gp)
+                if use_adaptive_penalty:
+                    penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
             if not is_feas:
                 y_gp += penalty
             Y_sample = np.append(Y_sample, y_gp)
@@ -833,19 +911,18 @@ def solve_bilevel_bo(
             kappa=kappa
         )
 
-        # Grid search for next point with error handling
+        # Grid search for next point in normalized space with error handling
         try:
-            X_bb_grid = rng.uniform(
-                problem.x_bb_lower, problem.x_bb_upper,
-                size=(1000, problem.n_x_bb)
-            )
-            acq_values = acq_func(X_bb_grid, gpr, np.min(Y_sample))
-            x_bb_next = X_bb_grid[np.argmax(acq_values)]
+            X_bb_grid_norm = rng.uniform(0.0, 1.0, size=(1000, problem.n_x_bb))
+            acq_values = acq_func(X_bb_grid_norm, gpr, np.min(Y_sample))
+            best_norm = X_bb_grid_norm[np.argmax(acq_values)]
+            # Convert back to original space
+            x_bb_next = bb_lower + best_norm * (bb_upper - bb_lower)
         except (np.linalg.LinAlgError, ValueError) as e:
             if verbose:
                 print(f"    Warning: Acquisition optimization failed at iteration {i+1}: {e}")
                 print(f"    Falling back to random sampling for this iteration.")
-            x_bb_next = rng.uniform(problem.x_bb_lower, problem.x_bb_upper)
+            x_bb_next = rng.uniform(bb_lower, bb_upper)
 
         J_next, x_wb_next = problem.evaluate_bilevel(
             x_bb_next, n_starts=n_inner_starts, rng=rng, return_x_wb=True
@@ -865,6 +942,10 @@ def solve_bilevel_bo(
             G_sample = np.vstack([G_sample, g_next])
 
         y_gp = sign * J_next
+        if is_feas:
+            Y_feasible_gp.append(y_gp)
+            if use_adaptive_penalty:
+                penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
         if not is_feas:
             y_gp += penalty
         Y_sample = np.append(Y_sample, y_gp)

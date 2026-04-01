@@ -485,7 +485,7 @@ Examples:
                         help='Base random seed')
     parser.add_argument('--no_plots', action='store_true',
                         help='Disable plot generation')
-    parser.add_argument('--xi', type=float, default=0.01,
+    parser.add_argument('--xi', type=float, default=0.1,
                         help='Exploration-exploitation trade-off for EI/PI/mWB2 (default: 0.01, higher = more exploration)')
     parser.add_argument('--xi_sweep', type=float, nargs='+', default=None,
                         help='Run experiments at multiple xi values (e.g., --xi_sweep 0.001 0.01 0.1 1.0)')

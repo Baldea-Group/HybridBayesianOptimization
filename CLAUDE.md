@@ -97,3 +97,38 @@ kernel = ConstantKernel() * RBF(length_scale_bounds=(1e-3, 1e3)) + WhiteKernel()
 
 ### Results Caching
 `run_comparison.py` caches results to `plots/results_cache.pkl`. Delete this file to force re-run.
+
+## Paper Story (OCAR Framework)
+
+### One-Sentence Story
+When grey-box problems have separable black-box and white-box variables—natural in multi-scale process-material co-design—embedding an exact NLP solver inside the BO loop reduces surrogate dimensionality, satisfies constraints exactly, and achieves orders-of-magnitude better solutions.
+
+### Opening (Big Problem)
+Engineering design couples expensive black-box simulations (DFT, molecular dynamics) with well-understood analytical models (mass/energy balances). How do we integrate prior knowledge into data-driven optimization?
+
+### Challenge (Gap)
+- NLP solvers need gradients through the black box—infeasible when evaluations take hours
+- Full-space BO wastes samples learning known equations and suffers curse of dimensionality
+- Grey-box BO (COBALT, BOCF) surrogates intermediate outputs y and propagates uncertainty through white-box equations via moment approximations—more general but inexact
+- **No method both separates variables and solves the white-box problem exactly**
+
+### Action (Method + Evidence)
+- Bilevel reformulation: BO over x^BB only, exact NLP inner solve for x^WB
+- 13-problem benchmark suite (largest for separable grey-box BO), verified global optima
+- 10,920 optimization runs (13 problems × 28 hyperparameter configs × 10 reps × 3 solvers)
+- Vanilla BO (RBF kernel, EI) used deliberately—gains come from problem structure, not algorithmic novelty
+
+### Resolution (Results)
+- 14×–277,000× lower regret than black-box BO on all 13 problems
+- Advantage grows with dimension (2D: 76–6,500×; 5D: up to 277,000×)
+- Tight-constraint problems (Distillation, Heat-Exchanger): >100,000× improvement
+- Comparable wall time for 12/13 problems
+- Robust to hyperparameters: n_init ∈ {1, 50}, ξ ∈ {0.001, 1.0}
+- Matches 20-restart NLP quality with ~200 evaluations vs. 900–3,000
+
+### Story Tensions to Address in Revisions
+1. **Simplicity tension**: Method is nearly obvious once you see separability—paper must argue why this hasn't been done systematically (position against COBALT/BOCF/bilevel BO literature)
+2. **Synthetic benchmarks**: All black-box functions are closed-form surrogates, not real DFT/MD—acknowledged honestly but limits engineering motivation
+3. **n_BB ≤ 2 ceiling**: All benchmarks have at most 2 black-box variables—scaling untested
+4. **No head-to-head with COBALT/BOCF**: Direct empirical comparison on same problems is future work
+5. **Missing Abstract**: Paper currently has no abstract section
