@@ -31,6 +31,7 @@ from typing import Dict, Any, List, Optional
 from functions import BiLevelProblem, get_all_problems, get_cobalt_problems
 from solvers import (
     solve_blackbox_nlp,
+    solve_global_de,
     solve_blackbox_bo,
     solve_bilevel_bo,
     compute_regret,
@@ -74,6 +75,7 @@ def run_experiments(
     base_seed = settings['base_seed']
     xi = settings.get('xi', 0.01)
     kappa = settings.get('kappa', 2.0)
+    inner_solver = settings.get('inner_solver', 'global')
 
     all_results = {}
 
@@ -95,6 +97,11 @@ def run_experiments(
             'maximize': problem.maximize,
             'acquisitions': acquisitions,
             'blackbox_nlp': {'final_regrets': [], 'best_Js': [], 'n_fbb_evals': [], 'wall_times': []},
+            'global_de': {
+                'regrets': [], 'final_regrets': [], 'best_Js': [],
+                'n_fbb_evals': [], 'wall_times': [],
+                'X_history': [], 'Y_history': []
+            },
         }
 
         # Initialize storage for each acquisition function
@@ -134,7 +141,52 @@ def run_experiments(
             if verbose:
                 print(f"           best_J = {res_nlp['best_J']:.6f}, regret = {regret_nlp:.6f}, time = {t_nlp:.2f}s")
 
-            # 2. Run BO methods for each acquisition function
+            # 2. Global DE (once per repetition, independent of acquisition)
+            if verbose:
+                print("    [DE] Global Differential Evolution...")
+            t0 = time.perf_counter()
+            try:
+                res_de = solve_global_de(
+                    problem, seed=seed, verbose=False, return_history=True
+                )
+                t_de = time.perf_counter() - t0
+
+                G_de = res_de.get('G_history', None)
+                regret_de = compute_regret(
+                    res_de['Y_history'], problem.J_optimal, G_de, problem.maximize
+                )
+
+                # Extract regret at BO-equivalent budget for fair comparison
+                bo_budget = n_iterations + n_initial
+                if len(regret_de) >= bo_budget:
+                    fair_regret = regret_de[bo_budget - 1]
+                else:
+                    fair_regret = regret_de[-1]
+
+                results['global_de']['regrets'].append(regret_de)
+                results['global_de']['final_regrets'].append(fair_regret)
+                results['global_de']['best_Js'].append(res_de['best_J'])
+                results['global_de']['n_fbb_evals'].append(res_de['n_fbb_evals'])
+                results['global_de']['wall_times'].append(t_de)
+                results['global_de']['X_history'].append(res_de.get('X_history', np.array([])))
+                results['global_de']['Y_history'].append(res_de.get('Y_history', np.array([])))
+
+                if verbose:
+                    print(f"           best_J = {res_de['best_J']:.6f}, regret@budget = {fair_regret:.6f}, "
+                          f"total_evals = {res_de['n_fbb_evals']}, time = {t_de:.2f}s")
+            except Exception as e:
+                t_de = time.perf_counter() - t0
+                if verbose:
+                    print(f"           ERROR: {type(e).__name__}: {e}")
+                results['global_de']['regrets'].append(np.array([np.inf]))
+                results['global_de']['final_regrets'].append(np.inf)
+                results['global_de']['best_Js'].append(np.inf if not problem.maximize else -np.inf)
+                results['global_de']['n_fbb_evals'].append(0)
+                results['global_de']['wall_times'].append(t_de)
+                results['global_de']['X_history'].append(np.array([]))
+                results['global_de']['Y_history'].append(np.array([]))
+
+            # 3. Run BO methods for each acquisition function
             for acq_idx, acq in enumerate(acquisitions):
                 # Black-box BO
                 if verbose:
@@ -180,7 +232,8 @@ def run_experiments(
                     res_bilevel = solve_bilevel_bo(
                         problem, n_iterations=n_iterations, n_initial=n_initial,
                         n_inner_starts=n_inner_starts, acquisition=acq, seed=seed,
-                        verbose=False, return_history=True, xi=xi, kappa=kappa
+                        verbose=False, return_history=True, xi=xi, kappa=kappa,
+                        inner_solver=inner_solver
                     )
                     t_bi = time.perf_counter() - t0
                     G_bi = res_bilevel.get('G_history', None)
@@ -227,7 +280,8 @@ def main(
     results_file: Optional[str] = None,
     save_plots: bool = True,
     xi_values: List[float] = None,
-    kappa: float = 2.0
+    kappa: float = 2.0,
+    inner_solver: str = 'global'
 ):
     """
     Main function to run experiments with multiple acquisition functions.
@@ -308,6 +362,7 @@ def main(
                 'acquisitions': acquisitions,
                 'xi': xi,
                 'kappa': kappa,
+                'inner_solver': inner_solver,
             }
 
             # Results file for this combination
@@ -355,6 +410,11 @@ def main(
                                 break
                             res = saved_results[name]
                             if len(res['blackbox_nlp']['final_regrets']) < n_repetitions:
+                                all_complete = False
+                                break
+                            # Check global DE
+                            de_res = res.get('global_de', {})
+                            if len(de_res.get('final_regrets', [])) < n_repetitions:
                                 all_complete = False
                                 break
                             # Check all acquisition functions
@@ -491,6 +551,9 @@ Examples:
                         help='Run experiments at multiple xi values (e.g., --xi_sweep 0.001 0.01 0.1 1.0)')
     parser.add_argument('--kappa', type=float, default=2.0,
                         help='Exploration parameter for LCB (default: 2.0, higher = more exploration)')
+    parser.add_argument('--inner_solver', type=str, default='global',
+                        choices=['multistart', 'global'],
+                        help='Inner solver for bi-level BO (default: global)')
 
     args = parser.parse_args()
 
@@ -526,5 +589,6 @@ Examples:
         base_seed=args.seed,
         save_plots=not args.no_plots,
         xi_values=xi_values,
-        kappa=args.kappa
+        kappa=args.kappa,
+        inner_solver=args.inner_solver
     )
