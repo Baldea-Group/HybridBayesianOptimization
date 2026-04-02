@@ -69,7 +69,7 @@ $^{4}$Institute for Computational Engineering and Sciences, The University of Te
 \bigskip
 
 \begin{abstract}
-We consider grey-box problems where the decision variables naturally partition into black-box variables $x^{\BB}$ (entering an expensive function) and white-box variables $x^{\WB}$ (governed by known equations), with the black-box depending only on $x^{\BB}$. We exploit this separability through a bilevel reformulation: the outer loop uses Bayesian optimization (BO) to optimize the scalar objective as a function of $x^{\BB}$ alone, while the inner loop implicitly solves the white-box subproblem via nonlinear programming (NLP). The Gaussian process surrogate therefore operates over $\mathbb{R}^{n_{\BB}}$ rather than $\mathbb{R}^{n_{\WB}+n_{\BB}}$, and white-box constraints are satisfied exactly whenever the inner NLP converges to a feasible point---without penalty functions, chance constraints, or moment approximations. On a suite of 13 benchmark problems bilevel BO achieves 14$\times$--277{,}000$\times$ lower regret than full-space BO across 7{,}410 independent optimization runs, with comparable wall time for 12 of 13 problems. The advantage grows with dimension---up to 277{,}000$\times$ on 5D problems---and is robust to initialization size and exploration parameters. When grey-box problems exhibit variable separability, solving the known subproblem exactly rather than surrogating it should be the default approach.
+We consider grey-box optimization problems where the decision variables naturally partition into black-box variables $x^{\BB}$ (as arguments to an expensive black-box function) and white-box variables $x^{\WB}$, governed by a set of explicit, closed-form equations that also depend on the output of the black-box function. We exploit this separability through a bilevel reformulation: an outer Bayesian optimization (BO) to optimize the scalar objective as a function of $x^{\BB}$ alone, while an inner problem solves the white-box subproblem via nonlinear programming (NLP). The Gaussian process surrogate used in BO is therefore defined $\mathbb{R}^{n_{\BB}}$ rather than $\mathbb{R}^{n_{\WB}+n_{\BB}}$, and white-box constraints are satisfied exactly whenever the inner NLP converges to a feasible point---without penalty functions, chance constraints, or moment approximations. On a suite of 13 benchmark problems bilevel BO achieves 14$\times$--277{,}000$\times$ lower regret than full-space BO across 7{,}410 independent optimization runs, with comparable wall clock time for 12 of 13 problems. The advantage grows with dimension---up to 277{,}000$\times$ on 5D problems---and is robust to initialization set size and exploration parameters.
 \end{abstract}
 
 \noindent\textbf{Keywords:} Bayesian optimization, Grey-box optimization, Bilevel optimization, Surrogate-based optimization, Multi-scale design, Dimensionality reduction
@@ -80,10 +80,14 @@ We consider grey-box problems where the decision variables naturally partition i
 \section{Introduction}\label{sec:introduction}
 
 Surrogate-based optimization is the standard approach for expensive black-box functions~\cite{frazier2018tutorial}, yet many problems contain known, differentiable substructure that monolithic surrogates waste samples learning. When an optimized system decomposes into an expensive black-box component and a cheap white-box component, building a single surrogate over all variables forces the Gaussian process (GP) to learn both the unknown and the known simultaneously. The cost of this redundancy grows with dimension: as the combined variable space $[x^{\WB}, x^{\BB}]$ expands, the curse of dimensionality penalizes the surrogate for structure it should never have had to discover.
+Surrogate-based optimization is the standard approach for expensive black-box functions~\cite{frazier2018tutorial}, yet many problems contain known, differentiable substructure that monolithic surrogates waste samples learning. When a model can be readily separated into an ``expensive'' black-box component and a ``cheap'' white-box component, building a single surrogate over all variables forces the surrogate model to learn both the unknown and the known components. The cost of this redundancy grows with dimension: as the size of the combined variable space $[x^{\WB}, x^{\BB}]$ expands, the curse of dimensionality burdens the surrogate for structure it should never have had to discover.
 
 This situation arises naturally in multi-scale engineering problems where design and operation are jointly optimized. For example, a catalyst designer uses density functional theory (DFT) simulations to predict kinetic parameters, which are then used in well-understood reactor mass and energy balances to evaluate reaction yield. Similarly, a polymer engineer uses molecular simulations to estimate membrane transport properties, then solves the solution-diffusion equations to size a separation unit. In each case, the overall objective depends on two groups of decision variables. \emph{Black-box variables} $x^{\BB}$ are inputs to expensive simulations or experiments such as molecular descriptors, catalyst properties, or experimental parameters. Conversely, \emph{white-box variables} $x^{\WB}$ aer decision variables that interact with well-understood equations. The black-box and white-box components are \emph{separable}: the expensive computation depends only on $x^{\BB}$, producing outputs $y = f^{\BB}(x^{\BB})$ that parameterize the white-box model. The key structural property is that, for any fixed $x^{\BB}$ and $y$, the remaining optimization over $x^{\WB}$ is a standard NLP solvable by conventional methods.
 
 Several lines of work exploit known structure in expensive optimization, ranging from deterministic grey-box solvers~\cite{boukouvala2017greybox_jgo,boukouvala2017argonaut,eason2016trf} to composite and structured Bayesian optimization~\cite{astudillo2019bocf,paulson2022cobalt,kudva2026bonsai} to data-driven bilevel methods~\cite{beykal2020domino,kieffer2017bilevel}. We review these in Section~\ref{sec:related_work}. The common gap is that no prior method combines a GP-based global search over only the black-box variables with exact NLP solution of the white-box subproblem---the configuration that fully exploits variable separability for both dimensionality reduction and exact constraint satisfaction.
+This situation arises naturally in multi-scale engineering problems where design and operation are jointly optimized. For example, a catalyst designer uses density functional theory (DFT) simulations to predict kinetic parameters, which are then used in well-understood reactor mass and energy balances to evaluate reaction yield. Similarly, a polymer engineer uses molecular simulations to estimate membrane transport properties, then solves the solution-diffusion equations to size a separation unit. In each case, the overall objective depends on two groups of decision variables. \emph{Black-box variables} $x^{\BB}$ are inputs to expensive simulations or experiments. Conversely, \emph{white-box variables} $x^{\WB}$ are variables present in the closed-form macroscopic equation. The black-box and white-box elements of the model are \emph{separable}: the expensive computation depends only on $x^{\BB}$, producing outputs $y = f^{\BB}(x^{\BB})$ that parameterize the white-box model. The key structural property is that, for any fixed $x^{\BB}$ and $y$, the remaining optimization over $x^{\WB}$ is a standard NLP solvable by conventional methods assuming that the $\WB$ equations are continuous and that $x^{\WB}$ are all real.
+
+Several lines of work exploit known structure in expensive optimization, ranging from deterministic grey-box solvers~\cite{boukouvala2017greybox_jgo,boukouvala2017argonaut,eason2016trf} to composite and structured Bayesian optimization~\cite{astudillo2019bocf,paulson2022cobalt,kudva2026bonsai} to data-driven bilevel methods~\cite{beykal2020domino,kieffer2017bilevel}. We review these in Section~\ref{sec:related_work}. The common gap is that no prior method combines a surrogate-based global search over only the black-box variables with exact NLP solution of the white-box subproblem---a configuration that fully exploits variable separability for both dimensionality reduction and exact constraint satisfaction.
 
 When the white-box optimization is solvable exactly, the surrogate should operate over $\mathbb{R}^{n_{\BB}}$ rather than $\mathbb{R}^{n_{\WB}+n_{\BB}}$. We exploit this through a bilevel reformulation: the outer loop uses BO to search over $x^{\BB}$; for each candidate, we evaluate the black box to obtain intermediate outputs $y$, then solve the white-box optimization exactly via nonlinear programming (NLP) to get $x^{\WB\star}$ and $J(x^{\WB\star})$. The GP models only the scalar mapping $x^{\BB} \mapsto J(x^{\WB\star}, y, x^{\BB})$, reducing the surrogate dimension from $n_{\WB}+n_{\BB}$ to $n_{\BB}$ and satisfying white-box constraints exactly whenever the inner NLP converges to a feasible point.
 
@@ -712,7 +716,7 @@ Gardner et al.~\cite{gardner2014} and Ariafar et al.~\cite{Ariafar2019} propose 
     &~~ 0 \leq x_i \leq 6, ~~~~ \forall i \in \{1, 2\}
 \end{align}
 
-The global minimum is $J^\star = 0.253236$ and is located at $x_1=\frac{3\pi}{2}$, $x^{\BB}=x_2=0.253236$.
+The global minimum is $J^\star = 0.2532$ and is located at $x^{\WB\star}_1=\frac{3\pi}{2}$, $x^{\BB\star}=x_2=1.2532$.
 
 \subsection{Modified Small Feasible Region Problem 2}\label{subsec:app_sfr2}
 
@@ -748,7 +752,7 @@ We use a modified formulation of the Toy Hydrology problem~\cite{gramacy2016} th
     &~~ 0 \leq x_i \leq 1, ~~~~~ \forall i \in \{ 1, 2 \}, \\\notag
     &~~ x = [x^{\WB}, x^{\BB}], ~~~~~ x^{\BB} = [x_1], ~~~~~ x^{\WB} = [x_2].
 \end{align}
-The global minimum is $0.5998$ with $x^{\WB\star} = 0.1951, x^{\BB\star} = 0.4047$.
+The global minimum is $0.5998$ with $x^{\WB\star} = 0.4047, x^{\BB\star} = 0.1951$.
 
 \subsection{Rosen-Suzuki}\label{subsec:app_rosen_suzuki}
 
@@ -823,7 +827,7 @@ The black-box function $f^{\BB}$ maps catalyst properties $\Delta E_a$, $E_b$ to
     \bottomrule
 \end{tabular}
 \end{table}
-The global maximum yield is $92.32\%$ with $x^{\WB\star} = [647.25, 20.00, 5.00]^\top$, $x^{\BB\star} = [-1.047, 0.20]^\top$.
+The global maximum yield is $92.32\%$ with $x^{\WB\star} = [647.3, 20.0, 5.0]^\top$, $x^{\BB\star} = [-1.047, 0.200]^\top$.
 
 \subsection{Heat Exchanger with Novel Working Fluid}\label{subsec:app_heat_exchanger}
 
@@ -867,7 +871,7 @@ $y_3$ & Thermal conductivity ($k$) & N/A & N/A & W/m$\cdot$K \\
 \end{tabular}
 \end{table}
 
-where $y_1$ is the heat capacity [kJ/kg$\cdot$K], $y_2$ is the viscosity [Pa$\cdot$s], and $y_3$ is the thermal conductivity [W/m$\cdot$K]. The constraint $g_1$ ensures the heat duty $Q = U \cdot A \cdot \Delta T_{lm} \geq 100$ kW is satisfied, and $g_2$ enforces turbulent flow with Reynolds number $\text{Re} \geq 4000$. The global minimum cost is $1000.0$ with $x^{\WB\star} = [1.0, 0.1, 39.59]^\top$, $x^{\BB\star} = [50.0, 0.0]^\top$.
+where $y_1$ is the heat capacity [kJ/kg$\cdot$K], $y_2$ is the viscosity [Pa$\cdot$s], and $y_3$ is the thermal conductivity [W/m$\cdot$K]. The constraint $g_1$ ensures the heat duty $Q = U \cdot A \cdot \Delta T_{lm} \geq 100$ kW is satisfied, and $g_2$ enforces turbulent flow with Reynolds number $\text{Re} \geq 4000$. The global minimum cost is $1000.0$ with $x^{\WB\star} = [1.0, 0.1, 19.3]^\top$, $x^{\BB\star} = [50.0, 0.0]^\top$.
 
 \subsection{Pressure Swing Adsorption with Novel Adsorbent}\label{subsec:app_psa}
 
@@ -976,7 +980,7 @@ $y_3 = K_{\text{eq}}$ & Adsorption equilibrium constant & --- & --- \\
 \end{tabular}
 \end{table}
 
-The constraint $g_1$ ensures minimum conversion $X_A \geq 0.8$, and $g_2$ enforces selectivity $S_B = C_B/(C_{A,0} - C_A) \geq 0.7$, requiring that at least 70\% of converted reactant forms the desired intermediate. The global minimum is $-1.7485$ with $x^{\WB\star} = [500.0, 4.394, 5.0]^\top$, $x^{\BB\star} = [-1.0, 2.0]^\top$.
+The constraint $g_1$ ensures minimum conversion $X_A \geq 0.8$, and $g_2$ enforces selectivity $S_B = C_B/(C_{A,0} - C_A) \geq 0.7$, requiring that at least 70\% of converted reactant forms the desired intermediate. The global minimum is $-1.7488$ with $x^{\WB\star} = [500.0, 4.394, 5.0]^\top$, $x^{\BB\star} = [-1.01, 2.0]^\top$.
 
 \subsection{Extractive Distillation with Novel Solvent}\label{subsec:app_distillation}
 
@@ -1035,7 +1039,7 @@ $x_B$ & Bottoms impurity specification & 0.01 & mol/mol \\
 \end{tabular}
 \end{table}
 
-The constraint $g_1$ ensures the reflux ratio exceeds the minimum by at least 20\% for operational flexibility, $g_2$ requires sufficient stages above the Fenske minimum, and $g_3$ limits solvent inventory based on density to control capital costs. The global minimum cost is $11759.0$ with $x^{\WB\star} = [1.0, 11.0, 0.5]^\top$, $x^{\BB\star} = [20.0, 10.0]^\top$.
+The constraint $g_1$ ensures the reflux ratio exceeds the minimum by at least 20\% for operational flexibility, $g_2$ requires sufficient stages above the Fenske minimum, and $g_3$ limits solvent inventory based on density to control capital costs. The global minimum cost is $11{,}758$ with $x^{\WB\star} = [1.0, 11.0, 0.5]^\top$, $x^{\BB\star} = [19.8, 9.99]^\top$.
 
 \subsection{Multi-Effect Evaporator with Phase-Change Material}\label{subsec:app_evaporator}
 
@@ -1225,7 +1229,7 @@ $F_{fA}$ & Feed flow rate of A (fixed) & 10 & klb/h \\
 \end{tabular}
 \end{table}
 
-The black-box outputs $y_1$ and $y_2$ represent catalyst activity factors for reactions 1 and 2, modeled as volcano-type functions of catalyst surface energy $\varepsilon$ and pore size $\sigma_c$. The constraint $g_1$ limits waste production ($F_{wG} \leq 1.0$ klb/h) and $g_2$ ensures mass balance closure ($\sum_i X_i \geq 0.5$). The global maximum net product flow is $5.460$ klb/h with $x^{\WB\star} = [581.6, 50.0, 50.0]^\top$, $x^{\BB\star} = [12.61, 6.11]^\top$.
+The black-box outputs $y_1$ and $y_2$ represent catalyst activity factors for reactions 1 and 2, modeled as volcano-type functions of catalyst surface energy $\varepsilon$ and pore size $\sigma_c$. The constraint $g_1$ limits waste production ($F_{wG} \leq 1.0$ klb/h) and $g_2$ ensures mass balance closure ($\sum_i X_i \geq 0.5$). The global maximum net product flow is $5.470$ klb/h with $x^{\WB\star} = [581.9, 50.0, 50.0]^\top$, $x^{\BB\star} = [12.6, 6.11]^\top$.
 
 %% ============================================================================
 %% APPENDIX B: ACQUISITION FUNCTIONS
@@ -1364,13 +1368,9 @@ Each problem's global optimum $J^\star$ was verified through a multi-stage proce
 
 \subsection{Verification Procedure}\label{subsec:verification_procedure}
 
-We used three complementary approaches. First, we ran differential evolution (DE) over the full variable space $[x^{\WB}, x^{\BB}]$ with a population of 100 and 1{,}000 generations. Second, we ran bilevel DE---differential evolution over $x^{\BB}$ with the inner NLP solved exactly for each candidate---to exploit the separable structure during verification. Third, we ran multi-start NLP with 1{,}000 random restarts.
+We used two complementary approaches, each repeated across 10 independent random seeds. First, we ran differential evolution (DE) over the full variable space $[x^{\WB}, x^{\BB}]$ with a population size of 30, a maximum of 2{,}000 generations, tight convergence tolerances ($\text{tol} = \text{atol} = 10^{-12}$), and SLSQP polishing of the best solution. Constraints were handled via \texttt{NonlinearConstraint}. Second, we ran multi-start SLSQP with 500 Latin hypercube starting points per seed.
 
-For each problem, we compared the best solutions from all three approaches. When all three methods agreed to within $10^{-4}$, we accepted the optimum. When they disagreed, we investigated manually by examining the objective landscape and constraint activity at the candidate optima.
-
-\subsection{Feasibility Checks}\label{subsec:feasibility_checks}
-
-For constrained problems, we verified that the reported optimal solution satisfies all inequality constraints $g_i(x^{\WB\star}, y^\star) \leq 0$ to within a tolerance of $10^{-6}$. We also checked that no nearby feasible point achieves a better objective, by perturbing the optimal solution along the active constraint boundaries and confirming that the objective worsens.
+For each problem, we compared the best feasible solutions across all 20 runs (10 DE + 10 multi-start NLP). All 13 problems achieved agreement to within $2 \times 10^{-4}$ relative error, confirming the reported optima. For constrained problems, we verified that the optimal solution satisfies all inequality constraints $g_i(x^{\WB\star}, y^\star) \leq 0$ to within a tolerance of $10^{-6}$.
 
 \subsection{Verified Optima}\label{subsec:verified_optima}
 
@@ -1378,26 +1378,26 @@ Table~\ref{tab:verified_optima} reports the verified global optimum for each pro
 
 \begin{table}[htbp]
 \centering
-\caption{Verified global optima for all 13 benchmark problems.}
+\caption{Verified global optima for all 13 benchmark problems. Optima verified via differential evolution (popsize = 30, maxiter = 2000, 10 seeds) and multi-start SLSQP (500 Latin hypercube starts, 10 seeds).}
 \label{tab:verified_optima}
 \begin{tabular}{@{}lrll@{}}
 \toprule
 \textbf{Problem} & $J^\star$ & $x^{\WB\star}$ & $x^{\BB\star}$ \\
 \midrule
-Small-Feasible-Region 1 & 0.2532 & $[4.712]$ & $[0.253]$ \\
+Small-Feasible-Region 1 & 0.2532 & $[4.712]$ & $[1.253]$ \\
 Small-Feasible-Region 2 & $-2.000$ & $[4.712]$ & $[5.500]$ \\
 Rastrigin & 0.0000 & $[0, 0]$ & $[0]$ \\
 Toy-Hydrology & 0.5998 & $[0.405]$ & $[0.195]$ \\
 Rosen-Suzuki & $-44.00$ & $[0, 1]$ & $[2, -1]$ \\
 \midrule
-CSTR & 92.32\% & $[647.2, 20.0, 5.0]$ & $[-1.047, 0.200]$ \\
-Heat-Exchanger & 1000.0 & $[1.0, 0.1, 39.6]$ & $[50.0, 0.0]$ \\
-PSA & $-0.6433$ & $[3.97, 0.1, 10.0]$ & $[6.04, 19.6]$ \\
-Batch-Reactor & $-1.749$ & $[500, 4.39, 5.0]$ & $[-1.0, 2.0]$ \\
-Distillation & 11{,}758 & $[1.0, 11.0, 0.5]$ & $[20.0, 10.0]$ \\
-Evaporator & $-1.959$ & $[4.09, 19.1, 5.0]$ & $[120.5, 2.0]$ \\
-Membrane & 11.00 & $[10.0, 0.1, 1.0]$ & $[0.30, 5.13]$ \\
-Williams-Otto & 5.460 & $[581.6, 50.0, 50.0]$ & $[12.6, 6.11]$ \\
+CSTR & 92.32\% & $[647.3,\; 20.0,\; 5.0]$ & $[-1.047,\; 0.200]$ \\
+Heat-Exchanger & 1000.0 & $[1.0,\; 0.1,\; 19.3]$ & $[50.0,\; 0.0]$ \\
+PSA & $-0.6433$ & $[3.97,\; 0.1,\; 10.0]$ & $[6.04,\; 19.6]$ \\
+Batch-Reactor & $-1.749$ & $[500,\; 4.39,\; 5.0]$ & $[-1.01,\; 2.00]$ \\
+Distillation & 11{,}758 & $[1.0,\; 11.0,\; 0.5]$ & $[19.8,\; 9.99]$ \\
+Evaporator & $-1.959$ & $[4.09,\; 19.1,\; 5.0]$ & $[120.5,\; 2.0]$ \\
+Membrane & 11.00 & $[10.0,\; 0.1,\; 1.0]$ & $[0.30,\; 5.13]$ \\
+Williams-Otto & 5.470 & $[581.9,\; 50.0,\; 50.0]$ & $[12.6,\; 6.11]$ \\
 \bottomrule
 \end{tabular}
 \end{table}
