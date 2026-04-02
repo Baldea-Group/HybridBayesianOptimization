@@ -28,7 +28,7 @@ Acquisition Functions:
 import numpy as np
 import time
 from typing import Optional, Tuple, Dict, Any, Literal, List, Callable
-from scipy.optimize import minimize
+from scipy.optimize import minimize, differential_evolution, NonlinearConstraint
 from scipy.stats import norm
 from scipy.stats.qmc import LatinHypercube
 from sklearn.gaussian_process import GaussianProcessRegressor
@@ -463,7 +463,164 @@ def solve_blackbox_nlp(
 
 
 # =============================================================================
-# Solver 2: Black-box Bayesian Optimization
+# Solver 2: Global Differential Evolution
+# =============================================================================
+
+class _CachedEvaluator:
+    """Cache wrapper to avoid double evaluation when DE calls objective and
+    constraint functions separately. Records every unique evaluation."""
+
+    def __init__(self, problem: BiLevelProblem, sign: float):
+        self.problem = problem
+        self.sign = sign  # +1 for min, -1 for max (DE always minimises)
+        self.cache: Dict[bytes, Tuple[float, np.ndarray]] = {}
+        self.X_history: List[np.ndarray] = []
+        self.Y_history: List[float] = []        # true objective values
+        self.G_history: List[np.ndarray] = []
+        self.eval_count: int = 0
+
+    def _evaluate(self, x: np.ndarray) -> Tuple[float, np.ndarray]:
+        key = x.tobytes()
+        if key not in self.cache:
+            obj, g = self.problem.evaluate_blackbox_with_constraints(x, count_eval=True)
+            self.cache[key] = (obj, g)
+            self.X_history.append(x.copy())
+            self.Y_history.append(obj)
+            self.G_history.append(g.copy() if len(g) > 0 else np.array([]))
+            self.eval_count += 1
+        return self.cache[key]
+
+    def objective(self, x: np.ndarray) -> float:
+        obj, _ = self._evaluate(x)
+        return self.sign * obj
+
+    def constraint(self, x: np.ndarray) -> np.ndarray:
+        _, g = self._evaluate(x)
+        return g
+
+
+def solve_global_de(
+    problem: BiLevelProblem,
+    popsize: int = 15,
+    seed: int = 42,
+    verbose: bool = True,
+    return_history: bool = False,
+    polish: bool = True,
+) -> dict:
+    """
+    Solve problem using scipy differential_evolution (global optimizer).
+
+    Runs to convergence with no artificial budget limit. Every function
+    evaluation is recorded so that regret can be read off at any evaluation
+    count for fair comparison with BO methods.
+
+    Args:
+        problem: BiLevelProblem instance
+        popsize: Population size multiplier for DE
+        seed: Random seed
+        verbose: Whether to print progress
+        polish: Whether to polish the best result with L-BFGS-B
+        return_history: Whether to return evaluation-by-evaluation history
+
+    Returns:
+        Dictionary with optimization results
+    """
+    problem.reset_counters()
+
+    x_lower, x_upper = problem.get_full_bounds()
+    bounds = list(zip(x_lower, x_upper))
+    has_constraints = problem.g is not None and problem.n_g > 0
+    sign = -1.0 if problem.maximize else 1.0
+
+    evaluator = _CachedEvaluator(problem, sign)
+
+    # Build constraint specification
+    constraints: tuple = ()
+    if has_constraints:
+        nlc = NonlinearConstraint(evaluator.constraint, -np.inf, 0.0)
+        constraints = (nlc,)
+
+    if verbose:
+        print(f"Global DE optimization of {problem.name}")
+        if has_constraints:
+            print(f"  Problem has {problem.n_g} constraints")
+        print(f"  Running differential evolution (popsize={popsize})...")
+
+    de_result = differential_evolution(
+        evaluator.objective,
+        bounds=bounds,
+        seed=seed,
+        popsize=popsize,
+        polish=polish,
+        constraints=constraints,
+        maxiter=1000,
+    )
+
+    # Find best feasible solution from history
+    Y_arr = np.array(evaluator.Y_history)
+    if has_constraints and len(evaluator.G_history) > 0:
+        G_arr = np.array(evaluator.G_history) if evaluator.G_history[0].size > 0 else None
+    else:
+        G_arr = None
+
+    if G_arr is not None:
+        feasible_mask = np.all(G_arr <= 1e-6, axis=1)
+        if np.any(feasible_mask):
+            feasible_Y = Y_arr.copy()
+            if problem.maximize:
+                feasible_Y[~feasible_mask] = -np.inf
+                best_idx = np.argmax(feasible_Y)
+            else:
+                feasible_Y[~feasible_mask] = np.inf
+                best_idx = np.argmin(feasible_Y)
+        else:
+            max_violation = np.max(G_arr, axis=1)
+            best_idx = np.argmin(max_violation)
+            if verbose:
+                print("  Warning: No feasible solution found!")
+    else:
+        if problem.maximize:
+            best_idx = np.argmax(Y_arr)
+        else:
+            best_idx = np.argmin(Y_arr)
+
+    best_x = evaluator.X_history[best_idx]
+    best_x_wb, best_x_bb = problem.split_x(best_x)
+    best_J = Y_arr[best_idx]
+
+    results = {
+        'best_x': best_x,
+        'best_x_wb': best_x_wb,
+        'best_x_bb': best_x_bb,
+        'best_J': best_J,
+        'n_fbb_evals': problem.n_fbb_evals,
+        'de_result': de_result,
+    }
+
+    if has_constraints and G_arr is not None:
+        results['best_g'] = evaluator.G_history[best_idx]
+        results['is_feasible'] = np.all(evaluator.G_history[best_idx] <= 1e-6)
+
+    if return_history:
+        results['X_history'] = np.array(evaluator.X_history)
+        results['Y_history'] = Y_arr
+        if has_constraints and G_arr is not None:
+            results['G_history'] = G_arr
+
+    if verbose:
+        print(f"  Optimization complete!")
+        print(f"    Best J = {best_J:.6f} (optimal: {problem.J_optimal})")
+        print(f"    Best x = {best_x}")
+        if has_constraints and G_arr is not None:
+            print(f"    Feasible: {results.get('is_feasible', True)}, g = {evaluator.G_history[best_idx]}")
+        print(f"    f^{{BB}} evaluations: {problem.n_fbb_evals}")
+        print(f"    DE converged: {de_result.success}, message: {de_result.message}")
+
+    return results
+
+
+# =============================================================================
+# Solver 3: Black-box Bayesian Optimization
 # =============================================================================
 
 def solve_blackbox_bo(
@@ -731,7 +888,7 @@ def solve_blackbox_bo(
 
 
 # =============================================================================
-# Solver 3: Bi-level (Hybrid) Bayesian Optimization
+# Solver 4: Bi-level (Hybrid) Bayesian Optimization
 # =============================================================================
 
 def solve_bilevel_bo(
@@ -746,7 +903,8 @@ def solve_bilevel_bo(
     verbose: bool = True,
     return_history: bool = False,
     xi: float = 0.01,
-    kappa: float = 2.0
+    kappa: float = 2.0,
+    inner_solver: str = 'global'
 ) -> dict:
     """
     Solve bi-level problem using Bayesian Optimization for outer problem.
@@ -770,6 +928,7 @@ def solve_bilevel_bo(
         return_history: Whether to return full optimization history
         xi: Exploration-exploitation trade-off for EI/PI/mWB2 (higher = more exploration)
         kappa: Exploration parameter for LCB/UCB (higher = more exploration)
+        inner_solver: Inner optimization method ('multistart' or 'global')
 
     Returns:
         Dictionary with optimization results
@@ -804,6 +963,7 @@ def solve_bilevel_bo(
 
     if verbose:
         print(f"Bi-level BO optimization of {problem.name}")
+        print(f"  Inner solver: {inner_solver}")
         print(f"  Acquisition function: {acquisition.upper()}")
         if has_constraints:
             pen_str = "adaptive" if use_adaptive_penalty else f"{penalty}"
@@ -817,7 +977,8 @@ def solve_bilevel_bo(
 
     for x_bb in X_bb_lhs:
         J_val, x_wb_opt = problem.evaluate_bilevel(
-            x_bb, n_starts=n_inner_starts, rng=rng, return_x_wb=True
+            x_bb, n_starts=n_inner_starts, rng=rng, return_x_wb=True,
+            inner_solver=inner_solver
         )
 
         # Check feasibility of inner solution
@@ -879,7 +1040,8 @@ def solve_bilevel_bo(
                 print(f"    Falling back to random sampling for this iteration.")
             x_bb_next = rng.uniform(bb_lower, bb_upper)
             J_next, x_wb_next = problem.evaluate_bilevel(
-                x_bb_next, n_starts=n_inner_starts, rng=rng, return_x_wb=True
+                x_bb_next, n_starts=n_inner_starts, rng=rng, return_x_wb=True,
+                inner_solver=inner_solver
             )
             pi_next = problem.fbb(x_bb_next)
             is_feas, g_next = check_feasibility(x_wb_next, pi_next)
@@ -925,7 +1087,8 @@ def solve_bilevel_bo(
             x_bb_next = rng.uniform(bb_lower, bb_upper)
 
         J_next, x_wb_next = problem.evaluate_bilevel(
-            x_bb_next, n_starts=n_inner_starts, rng=rng, return_x_wb=True
+            x_bb_next, n_starts=n_inner_starts, rng=rng, return_x_wb=True,
+            inner_solver=inner_solver
         )
 
         # Check feasibility
