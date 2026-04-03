@@ -1,12 +1,11 @@
 """
-generate_launcher_commands.py - Generate SLURM job array for TACC Lonestar6.
+tacc_generate_launcher_commands.py - Generate SLURM job array for TACC Lonestar6.
 
 Creates:
-  - launcher_commands.txt  : one command per line, indexed by SLURM_ARRAY_TASK_ID
-  - launch.slurm           : SLURM job array script for Lonestar6
+  - tacc_launcher_commands.txt  : one command per line, indexed by SLURM_ARRAY_TASK_ID
+  - tacc_launch.slurm           : SLURM job array script for Lonestar6
 
-All paths are relative to the repository root. The SLURM script cd's to
-the repo root at runtime so that run_single_job.py and its imports resolve.
+All paths are relative to the repository root.
 """
 
 import argparse
@@ -41,10 +40,8 @@ def main():
                         help='Max simultaneous array tasks')
     args = parser.parse_args()
 
-    tacc_dir = Path(__file__).parent
-    repo_root = tacc_dir.parent
+    repo_root = Path(__file__).parent
 
-    # Generate command file — paths relative to repo root
     commands = []
     for problem in PROBLEMS:
         for n_init in N_INIT_VALUES:
@@ -57,7 +54,7 @@ def main():
                        f"--outdir {args.outdir}")
                 commands.append(cmd)
 
-    cmd_file = tacc_dir / 'launcher_commands.txt'
+    cmd_file = repo_root / 'tacc_launcher_commands.txt'
     with open(cmd_file, 'w') as f:
         f.write('\n'.join(commands) + '\n')
     print(f"Wrote {len(commands)} commands to {cmd_file}")
@@ -65,7 +62,6 @@ def main():
     n_tasks = len(commands)
     max_idx = n_tasks - 1
 
-    # SLURM script uses SCRIPT_DIR to resolve paths at runtime
     slurm_script = f"""#!/bin/bash
 #SBATCH -J bo_sweep
 #SBATCH -o logs/bo_%A_%a.out
@@ -77,7 +73,7 @@ def main():
 #SBATCH -A {args.allocation}
 #SBATCH --array=0-{max_idx}%{args.max_concurrent}
 
-# Resolve the directory containing this script (works on any machine)
+# cd to repo root (script lives at repo root)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -89,13 +85,13 @@ eval "$(conda shell.bash hook)"
 conda activate {args.conda_env}
 
 # Read the command for this array task
-CMD=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" launcher_commands.txt)
+CMD=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" tacc_launcher_commands.txt)
 
 echo "Task $SLURM_ARRAY_TASK_ID: $CMD"
 eval "$CMD"
 """
 
-    slurm_file = script_dir / 'launch.slurm'
+    slurm_file = repo_root / 'tacc_launch.slurm'
     with open(slurm_file, 'w') as f:
         f.write(slurm_script)
     print(f"Wrote SLURM script to {slurm_file}")
@@ -105,12 +101,12 @@ eval "$CMD"
     print(f"Wall time per task: {args.runtime}")
 
     print(f"\nUsage:")
-    print(f"  Submit all:           sbatch launch.slurm")
-    print(f"  Submit subset:        sbatch --array=0-20 launch.slurm")
-    print(f"  Rerun failed tasks:   sbatch --array=5,12,99 launch.slurm")
+    print(f"  Submit all:           sbatch tacc_launch.slurm")
+    print(f"  Submit subset:        sbatch --array=0-20 tacc_launch.slurm")
+    print(f"  Rerun failed tasks:   sbatch --array=5,12,99 tacc_launch.slurm")
     print(f"  Check status:         sacct -j <JOBID> --format=JobID,State,Elapsed")
-    print(f"  After completion:     python gather_results.py")
-    print(f"\nLocal parallel run:     parallel -j 8 < launcher_commands.txt")
+    print(f"  After completion:     python tacc_gather_results.py")
+    print(f"\nLocal parallel run:     parallel -j 8 < tacc_launcher_commands.txt")
 
 
 if __name__ == '__main__':

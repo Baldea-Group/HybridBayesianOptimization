@@ -1,5 +1,5 @@
 """
-gather_results.py - Merge per-job pickle files into combined results.
+tacc_gather_results.py - Merge per-job pickle files into combined results.
 
 Reads individual pickles from results_parallel/, groups by (n_init, xi),
 and writes combined pickle files matching the format run_comparison.py expects.

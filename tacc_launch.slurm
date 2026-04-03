@@ -8,7 +8,9 @@
 #SBATCH -t 10:00:00
 #SBATCH -A DDM25011
 
-cd "$SLURM_SUBMIT_DIR"
+# cd to repo root (script lives at repo root)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 mkdir -p results_parallel
 mkdir -p logs
@@ -17,6 +19,6 @@ mkdir -p logs
 eval "$(conda shell.bash hook)"
 conda activate bo
 
-# Use pylauncher to run all 273 commands across 32 cores
+# Use pylauncher to run all commands across 32 cores
 module load pylauncher
-python3 -c "import pylauncher; pylauncher.ClassicLauncher('launcher_commands.txt')"
+python3 -c "import pylauncher; pylauncher.ClassicLauncher('tacc_launcher_commands.txt')"
