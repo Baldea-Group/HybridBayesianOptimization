@@ -8,9 +8,7 @@
 #SBATCH -t 10:00:00
 #SBATCH -A DDM25011
 
-# Resolve the directory containing this script (works on any machine)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SLURM_SUBMIT_DIR"
 
 mkdir -p results_parallel
 mkdir -p logs
@@ -21,4 +19,4 @@ conda activate bo
 
 # Use pylauncher to run all 273 commands across 32 cores
 module load pylauncher
-python $TACC_PYLAUNCHER/launch.py launcher_commands.txt
+python3 -c "import pylauncher; pylauncher.ClassicLauncher('launcher_commands.txt')"
