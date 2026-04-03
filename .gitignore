@@ -8,14 +8,14 @@ build/
 *.egg
 
 # Results and generated plots
-HybridBayesianOptimization/Examples/results/
-HybridBayesianOptimization/Examples/plots*/
+results/
+plots*/
 
 # Literature (reference PDFs)
 Literature/
 
 # Presentations
-HybridBayesianOptimization/Presentations/
+Presentations/
 
 # LaTeX build artifacts
 *.aux
@@ -41,6 +41,10 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Claude Code
+.claude/
+CLAUDE.md
 
 # Misc
 *.pkl

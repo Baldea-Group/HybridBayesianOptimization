@@ -11,10 +11,10 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from pathlib import Path
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "Examples"
-RESULTS_DIR  = EXAMPLES_DIR / "results"
+REPO_ROOT    = Path(__file__).resolve().parent.parent
+RESULTS_DIR  = REPO_ROOT / "results"
 FIG_DIR      = Path(__file__).resolve().parent / "figs"
-sys.path.insert(0, str(EXAMPLES_DIR))
+sys.path.insert(0, str(REPO_ROOT))
 
 from functions import create_small_feasible_region, create_small_feasible_region2
 from solvers import solve_blackbox_bo, solve_bilevel_bo
