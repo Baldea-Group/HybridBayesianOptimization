@@ -5,8 +5,8 @@ Creates:
   - launcher_commands.txt  : one command per line, indexed by SLURM_ARRAY_TASK_ID
   - launch.slurm           : SLURM job array script for Lonestar6
 
-All paths are relative so the repo can be cloned and run anywhere.
-The SLURM script cd's to the script's directory at runtime.
+All paths are relative to the repository root. The SLURM script cd's to
+the repo root at runtime so that run_single_job.py and its imports resolve.
 """
 
 import argparse
@@ -41,9 +41,10 @@ def main():
                         help='Max simultaneous array tasks')
     args = parser.parse_args()
 
-    script_dir = Path(__file__).parent
+    tacc_dir = Path(__file__).parent
+    repo_root = tacc_dir.parent
 
-    # Generate command file — all paths relative (run_single_job.py is in same dir)
+    # Generate command file — paths relative to repo root
     commands = []
     for problem in PROBLEMS:
         for n_init in N_INIT_VALUES:
@@ -56,7 +57,7 @@ def main():
                        f"--outdir {args.outdir}")
                 commands.append(cmd)
 
-    cmd_file = script_dir / 'launcher_commands.txt'
+    cmd_file = tacc_dir / 'launcher_commands.txt'
     with open(cmd_file, 'w') as f:
         f.write('\n'.join(commands) + '\n')
     print(f"Wrote {len(commands)} commands to {cmd_file}")
