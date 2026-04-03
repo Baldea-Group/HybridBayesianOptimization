@@ -28,6 +28,10 @@ import warnings
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+from utils import RESULTS_DIR, ensure_dir
+from utils import results_file as make_results_path
+from utils import plots_dir as make_plots_dir
+
 from functions import BiLevelProblem, get_all_problems, get_cobalt_problems
 from solvers import (
     solve_blackbox_nlp,
@@ -367,15 +371,11 @@ def main(
 
             # Results file for this combination
             if results_file is None:
-                acq_str = '_'.join(acquisitions)
-                base_name = f'results_{problem_set}_{acq_str}'
-                if len(n_initial_values) > 1:
-                    base_name += f'_ninit{n_initial}'
-                if len(xi_values) > 1:
-                    base_name += f'_xi{xi}'
-                results_dir = Path(__file__).parent / "results"
-                results_dir.mkdir(exist_ok=True)
-                combo_results_file = results_dir / f'{base_name}.pkl'
+                ensure_dir(RESULTS_DIR)
+                n_init_arg = n_initial if len(n_initial_values) > 1 else None
+                xi_arg = xi if len(xi_values) > 1 else None
+                combo_results_file = make_results_path(
+                    problem_set, acquisitions, n_init_arg, xi_arg)
             else:
                 base_path = Path(results_file)
                 suffix_parts = []
@@ -467,15 +467,9 @@ def main(
                 print("\n" + "=" * 70)
                 print(f"Generating plots for n_init={n_initial}, xi={xi}...")
                 print("=" * 70)
-                plot_suffix_parts = []
-                if len(n_initial_values) > 1:
-                    plot_suffix_parts.append(f'ninit{n_initial}')
-                if len(xi_values) > 1:
-                    plot_suffix_parts.append(f'xi{xi}')
-                if plot_suffix_parts:
-                    save_dir = Path(__file__).parent / f"plots_{'_'.join(plot_suffix_parts)}"
-                else:
-                    save_dir = Path(__file__).parent / "plots"
+                n_init_arg = n_initial if len(n_initial_values) > 1 else None
+                xi_arg = xi if len(xi_values) > 1 else None
+                save_dir = make_plots_dir(n_init_arg, xi_arg)
                 plot_results(all_results, save_dir=save_dir)
 
     # Print combined summary if sweeping over multiple values
