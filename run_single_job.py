@@ -29,6 +29,26 @@ from solvers import (
 
 def run_single(problem_name, n_init, xi, n_iter, n_reps, base_seed, acq,
                inner_solver, n_starts_nlp, n_inner_starts, kappa, outdir):
+    out_path = Path(outdir)
+    fname = out_path / f"{problem_name}_ninit{n_init}_xi{xi}.pkl"
+
+    if fname.exists():
+        try:
+            with open(fname, 'rb') as f:
+                saved = pickle.load(f)
+            s = saved.get('settings', {})
+            if (s.get('n_iterations') == n_iter and
+                    s.get('n_initial') == n_init and
+                    s.get('xi') == xi and
+                    s.get('n_repetitions') == n_reps and
+                    s.get('base_seed') == base_seed and
+                    s.get('acquisitions') == [acq] and
+                    s.get('inner_solver') == inner_solver):
+                print(f"Skipping — complete results found in {fname}", flush=True)
+                return
+        except Exception:
+            pass  # corrupted file, re-run
+
     problems = get_all_problems()
     if problem_name not in problems:
         raise ValueError(f"Unknown problem: {problem_name}. "
@@ -207,9 +227,7 @@ def run_single(problem_name, n_init, xi, n_iter, n_reps, base_seed, acq,
         'inner_solver': inner_solver,
     }
 
-    out_path = Path(outdir)
     out_path.mkdir(parents=True, exist_ok=True)
-    fname = out_path / f"{problem_name}_ninit{n_init}_xi{xi}.pkl"
     with open(fname, 'wb') as f:
         pickle.dump({'settings': settings, 'results': {problem_name: results}}, f)
     print(f"  Saved -> {fname}", flush=True)
