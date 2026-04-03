@@ -9,7 +9,12 @@ build/
 
 # Results and generated plots
 results/
+results_parallel/
 plots*/
+
+# Generated TACC files
+tacc_launcher_commands.txt
+logs/
 
 # Literature (reference PDFs)
 Literature/
