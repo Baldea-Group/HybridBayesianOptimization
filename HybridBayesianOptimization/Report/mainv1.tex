@@ -69,7 +69,7 @@ $^{4}$Institute for Computational Engineering and Sciences, The University of Te
 \bigskip
 
 \begin{abstract}
-We consider grey-box optimization problems where the decision variables naturally partition into black-box variables $x^{\BB}$ (as arguments to an expensive black-box function) and white-box variables $x^{\WB}$, governed by a set of explicit, closed-form equations that also depend on the output of the black-box function. We exploit this separability through a bilevel reformulation: an outer Bayesian optimization (BO) to optimize the scalar objective as a function of $x^{\BB}$ alone, while an inner problem solves the white-box subproblem via global optimization. The Gaussian process surrogate used in BO is therefore defined $\mathbb{R}^{n_{\BB}}$ rather than $\mathbb{R}^{n_{\WB}+n_{\BB}}$, and white-box constraints are satisfied exactly whenever the inner optimizer converges to a feasible point---without penalty functions, chance constraints, or moment approximations. On a suite of 13 benchmark problems bilevel BO achieves 14$\times$--277{,}000$\times$ lower regret than full-space BO across 7{,}410 independent optimization runs, with comparable wall clock time for 12 of 13 problems. The advantage grows with dimension---up to 277{,}000$\times$ on 5D problems---and is robust to initialization set size and exploration parameters.
+We consider grey-box problems where the decision variables naturally partition into black-box variables $x^{\BB}$ (entering an expensive function) and white-box variables $x^{\WB}$ (governed by known equations), with the black-box depending only on $x^{\BB}$. We exploit this separability through a bilevel reformulation: the outer loop uses Bayesian optimization (BO) to optimize the scalar objective as a function of $x^{\BB}$ alone, while the inner loop implicitly solves the white-box subproblem via nonlinear programming (NLP). The Gaussian process surrogate therefore operates over $\mathbb{R}^{n_{\BB}}$ rather than $\mathbb{R}^{n_{\WB}+n_{\BB}}$, and white-box constraints are satisfied exactly whenever the inner NLP converges to a feasible point---without penalty functions, chance constraints, or moment approximations. On a suite of 13 benchmark problems bilevel BO achieves 14$\times$--277{,}000$\times$ lower regret than full-space BO across 7{,}410 independent optimization runs, with comparable wall time for 12 of 13 problems. The advantage grows with dimension---up to 277{,}000$\times$ on 5D problems---and is robust to initialization size and exploration parameters. When grey-box problems exhibit variable separability, solving the known subproblem exactly rather than surrogating it should be the default approach.
 \end{abstract}
 
 \noindent\textbf{Keywords:} Bayesian optimization, Grey-box optimization, Bilevel optimization, Surrogate-based optimization, Multi-scale design, Dimensionality reduction
@@ -79,19 +79,19 @@ We consider grey-box optimization problems where the decision variables naturall
 %% ============================================================================
 \section{Introduction}\label{sec:introduction}
 
-Surrogate-based optimization is the standard approach for expensive black-box functions~\cite{frazier2018tutorial}, yet many problems contain known, differentiable substructure that monolithic surrogates waste samples learning. When a model can be readily separated into an ``expensive'' black-box component and a ``cheap'' white-box component, building a single surrogate over all variables forces the surrogate model to learn both the unknown and the known components. The cost of this redundancy grows with dimension: as the size of the combined variable space $[x^{\WB}, x^{\BB}]$ expands, the curse of dimensionality burdens the surrogate for structure it should never have had to discover.
+Surrogate-based optimization is the standard approach for expensive black-box functions~\cite{frazier2018tutorial}, yet many problems contain known, differentiable substructure that monolithic surrogates waste samples learning. When an optimized system decomposes into an expensive black-box component and a cheap white-box component, building a single surrogate over all variables forces the Gaussian process (GP) to learn both the unknown and the known simultaneously. The cost of this redundancy grows with dimension: as the combined variable space $[x^{\WB}, x^{\BB}]$ expands, the curse of dimensionality penalizes the surrogate for structure it should never have had to discover.
 
-This situation arises naturally in multi-scale engineering problems where design and operation are jointly optimized. For example, a catalyst designer uses density functional theory (DFT) simulations to predict kinetic parameters, which are then used in well-understood reactor mass and energy balances to evaluate reaction yield. Similarly, a polymer engineer uses molecular simulations to estimate membrane transport properties, then solves the solution-diffusion equations to size a separation unit. In each case, the overall objective depends on two groups of decision variables. \emph{Black-box variables} $x^{\BB}$ are inputs to expensive simulations or experiments. Conversely, \emph{white-box variables} $x^{\WB}$ are variables present in the closed-form macroscopic equation. The black-box and white-box elements of the model are \emph{separable}: the expensive computation depends only on $x^{\BB}$, producing outputs $y = f^{\BB}(x^{\BB})$ that parameterize the white-box model. The key structural property is that, for any fixed $x^{\BB}$ and $y$, the remaining optimization over $x^{\WB}$ is a standard NLP solvable by conventional methods assuming that the $\WB$ equations are continuous and that $x^{\WB}$ are all real.
+This situation arises naturally in multi-scale engineering problems where design and operation are jointly optimized. For example, a catalyst designer uses density functional theory (DFT) simulations to predict kinetic parameters, which are then used in well-understood reactor mass and energy balances to evaluate reaction yield. Similarly, a polymer engineer uses molecular simulations to estimate membrane transport properties, then solves the solution-diffusion equations to size a separation unit. In each case, the overall objective depends on two groups of decision variables. \emph{Black-box variables} $x^{\BB}$ are inputs to expensive simulations or experiments such as molecular descriptors, catalyst properties, or experimental parameters. Conversely, \emph{white-box variables} $x^{\WB}$ aer decision variables that interact with well-understood equations. The black-box and white-box components are \emph{separable}: the expensive computation depends only on $x^{\BB}$, producing outputs $y = f^{\BB}(x^{\BB})$ that parameterize the white-box model. The key structural property is that, for any fixed $x^{\BB}$ and $y$, the remaining optimization over $x^{\WB}$ is a standard NLP solvable by conventional methods.
 
-Several lines of work exploit known structure in expensive optimization, ranging from deterministic grey-box solvers~\cite{boukouvala2017greybox_jgo,boukouvala2017argonaut,eason2016trf} to composite and structured Bayesian optimization~\cite{astudillo2019bocf,paulson2022cobalt,kudva2025bonsai} to data-driven bilevel methods~\cite{beykal2020domino,kieffer2017bilevel}. We review these in Section~\ref{sec:related_work}. The common gap is that no prior method combines a surrogate-based global search over only the black-box variables with exact NLP solution of the white-box subproblem---a configuration that fully exploits variable separability for both dimensionality reduction and exact constraint satisfaction.
+Several lines of work exploit known structure in expensive optimization, ranging from deterministic grey-box solvers~\cite{boukouvala2017greybox_jgo,boukouvala2017argonaut,eason2016trf} to composite and structured Bayesian optimization~\cite{astudillo2019bocf,paulson2022cobalt,kudva2026bonsai} to data-driven bilevel methods~\cite{beykal2020domino,kieffer2017bilevel}. We review these in Section~\ref{sec:related_work}. The common gap is that no prior method combines a GP-based global search over only the black-box variables with exact NLP solution of the white-box subproblem---the configuration that fully exploits variable separability for both dimensionality reduction and exact constraint satisfaction.
 
-When the white-box optimization is solvable exactly, the surrogate should operate over $\mathbb{R}^{n_{\BB}}$ rather than $\mathbb{R}^{n_{\WB}+n_{\BB}}$. We exploit this through a bilevel reformulation: the outer loop uses Bayesian Optimization (BO) to search over $x^{\BB}$; for each candidate, we evaluate the black box to obtain intermediate outputs $y$, then solve the white-box optimization exactly via global optimization to get $x^{\WB\star}$ and $J(x^{\WB\star})$. The GP models only the scalar mapping $x^{\BB} \mapsto J(x^{\WB\star}, y, x^{\BB})$, reducing the surrogate dimension from $n_{\WB}+n_{\BB}$ to $n_{\BB}$ and satisfying white-box constraints exactly whenever the inner optimizer converges to a feasible point.
+When the white-box optimization is solvable exactly, the surrogate should operate over $\mathbb{R}^{n_{\BB}}$ rather than $\mathbb{R}^{n_{\WB}+n_{\BB}}$. We exploit this through a bilevel reformulation: the outer loop uses BO to search over $x^{\BB}$; for each candidate, we evaluate the black box to obtain intermediate outputs $y$, then solve the white-box optimization exactly via nonlinear programming (NLP) to get $x^{\WB\star}$ and $J(x^{\WB\star})$. The GP models only the scalar mapping $x^{\BB} \mapsto J(x^{\WB\star}, y, x^{\BB})$, reducing the surrogate dimension from $n_{\WB}+n_{\BB}$ to $n_{\BB}$ and satisfying white-box constraints exactly whenever the inner NLP converges to a feasible point.
 
 We make three contributions:
 \begin{enumerate}
-    \item A bilevel reformulation that reduces surrogate dimensionality from $n_{\WB}+n_{\BB}$ to $n_{\BB}$ by solving the white-box subproblem via global optimization, with white-box constraints satisfied exactly whenever the inner optimizer converges to a feasible point---without penalty functions, chance constraints, or moment approximations.
-    \item A benchmark suite of 13 separable grey-box problems (2--5 total variables, 0--3 constraints) considering synthetic test functions and prototype engineering applications---the largest such suite for this problem class.
-    \item Comprehensive empirical evidence from 7{,}410 independent optimization runs (7{,}280 BO + 130 NLP): the proposed bilevel strategy achieves 14$\times$--277{,}000$\times$ lower regret than black-box BO across all 13 problems, with comparable wall clock time and robustness to hyperparameters ($n_\text{init}$, $\xi$).
+    \item A bilevel reformulation that reduces surrogate dimensionality from $n_{\WB}+n_{\BB}$ to $n_{\BB}$ by solving the white-box subproblem exactly via NLP, with white-box constraints satisfied exactly whenever the inner NLP converges to a feasible point---without penalty functions, chance constraints, or moment approximations.
+    \item A benchmark suite of 13 separable grey-box problems (2--5 total variables, 0--3 constraints, both min and max) spanning synthetic test functions and engineering domains---the largest such suite for this problem class.
+    \item Comprehensive empirical evidence from 7{,}410 independent optimization runs (7{,}280 BO + 130 NLP): bilevel BO achieves 14$\times$--277{,}000$\times$ lower regret than black-box BO across all 13 problems, with comparable wall time and robustness to hyperparameters ($n_\text{init}$, $\xi$).
 \end{enumerate}
 
 %% ============================================================================
@@ -99,37 +99,37 @@ We make three contributions:
 %% ============================================================================
 \section{Related Work}\label{sec:related_work}
 
-Conceptually, the proposed bilevel framework lies at the intersection of surrogate-based global optimization, grey-box Bayesian optimization, bilevel programming, and constrained expensive optimization. We review each of these areas, focusing on the structural assumptions each approach makes and where those assumptions limit applicability to separable grey-box problems.
+Our bilevel framework sits at the intersection of surrogate-based global optimization, grey-box Bayesian optimization, bilevel programming, and constrained expensive optimization. We review each thread, focusing on the structural assumptions each approach makes and where those assumptions limit applicability to separable grey-box problems.
 
 \subsection{Surrogate-Based Global Optimization}
 
-The use of surrogate models to guide expensive optimization traces to the Efficient Global Optimization (EGO) algorithm of Jones et al.~\cite{jones1998efficient}, which introduced Expected Improvement (EI) as an acquisition function for Gaussian Process (GP) surrogates. EGO treats the objective as a monolithic black box and builds a single GP over the full decision space---an approach that remains the default in most BO implementations~\cite{shahriari2016bo_survey,frazier2018tutorial}.
+The use of surrogate models to guide expensive optimization traces to the Efficient Global Optimization (EGO) algorithm of Jones et al.~\cite{jones1998efficient}, which introduced Expected Improvement (EI) as an acquisition function for Gaussian process surrogates. EGO treats the objective as a monolithic black box and builds a single GP over the full decision space---an approach that remains the default in most BO implementations~\cite{shahriari2016bo_survey,frazier2018tutorial}.
 
-Within the deterministic surrogate realm, Boukouvala, Hasan, and Floudas~\cite{boukouvala2017greybox_jgo} developed a methodology for constrained grey-box problems that selects surrogates from a diverse set of functional forms and globally optimizes the resulting NLP. The companion ARGONAUT framework~\cite{boukouvala2017argonaut} formalized this into an iterative algorithm with variable selection, bounds tightening, and constrained sampling for problems with up to 100 variables; Kieslich et al.~\cite{kieslich2018smolyak} extended the approach using Smolyak grids and polynomial surrogates. These methods share our philosophy of exploiting known equations, but they surrogate every variable indiscriminately rather than distinguishing black-box from white-box components; the known equations are used only to generate training data or to tighten bounds, not to reduce the surrogate's dimensionality. Moreover, the deterministic surrogates they employ lack the principled exploration--exploitation trade-off of probabilistic models and tend to overexploit early samples under tight evaluation budgets.
+Within the deterministic surrogate tradition, Boukouvala, Hasan, and Floudas~\cite{boukouvala2017greybox_jgo} developed a methodology for constrained grey-box problems that selects surrogates from a diverse set of functional forms and globally optimizes the resulting NLP. The companion ARGONAUT framework~\cite{boukouvala2017argonaut} formalized this into an iterative algorithm with variable selection, bounds tightening, and constrained sampling for problems with up to 100 variables; Kieslich et al.~\cite{kieslich2018smolyak} extended the approach using Smolyak grids and polynomial surrogates. These methods share our philosophy of exploiting known equations, but use deterministic surrogates that lack the principled exploration--exploitation trade-off of probabilistic models and tend to overexploit early samples under tight evaluation budgets.
 
-The trust-region filter algorithms of Eason and Biegler~\cite{eason2016trf,eason2018trf} offer a complementary local approach: they embed surrogates for black-box components within a trust region and solve the white-box NLP at each iteration. This is architecturally close to our inner-loop optimization, but the trust-region framework provides only local convergence guarantees---no global exploration mechanism steers the search away from suboptimal local minima.
+The trust-region filter algorithms of Eason and Biegler~\cite{eason2016trf,eason2018trf} offer a complementary local approach: they embed surrogates for black-box components within a trust region and solve the glass-box NLP at each iteration. This is architecturally close to our inner-loop NLP solve, but the trust-region framework provides only local convergence guarantees---no global exploration mechanism steers the search away from poor basins.
 
 \subsection{Grey-Box Bayesian Optimization}
 
-Grey-box BO methods incorporate known structure into the surrogate to reduce its modeling burden. Astudillo and Frazier~\cite{astudillo2019bocf} introduced Bayesian Optimization of Composite Functions (BOCF) which models composite functions $g(h(x))$ by training a multi-output GP on the expensive inner function $h$ and propagating uncertainty through the known outer function $g$ via sampling; later extensions handle function networks~\cite{astudillo2021bofn} and partial evaluations~\cite{buathong2024partial}. Paulson and Lu~\cite{paulson2022cobalt} extend this to constrained grey-box problems by combining multivariate GP models with a constrained expected utility function, using sample average approximation and chance constraints to propagate GP uncertainty through known equations. Gonz\'{a}lez and Zavala~\cite{gonzalez2024bois} propose an interconnected-systems BO framework with adaptive linearization, Winz et al.~\cite{winz2025greybox} modify the upper confidence bound to exploit grey-box derivative information, and Kudva and Paulson~\cite{kudva2025bonsai} exploit function-network topology for robust optimization.
+Grey-box BO methods incorporate known structure into the surrogate to reduce its modeling burden. Astudillo and Frazier~\cite{astudillo2019bocf} modeled composite functions $g(h(x))$ by placing a multi-output GP on the expensive inner function $h$ and propagating uncertainty through the known outer function $g$ via sampling; later extensions handle function networks~\cite{astudillo2021bofn} and partial evaluations~\cite{buathong2024partial}. COBALT~\cite{paulson2022cobalt} extends this to constrained grey-box problems by combining multivariate GP models with a constrained expected utility function, using sample average approximation and chance constraints to propagate GP uncertainty through known equations. Gonz\'{a}lez-Garay and del Rio-Chanona~\cite{gonzalez2025bois} propose an interconnected-systems BO framework with adaptive linearization, Winz et al.~\cite{winz2025greybox} modify the upper confidence bound to exploit grey-box derivative information, and BONSAI~\cite{kudva2026bonsai} exploits function-network topology for robust optimization.
 
-All of these methods create surrogate models of the \emph{intermediate} black-box outputs $y$ and propagate uncertainty through the white-box equations, requiring multi-output GPs and moment approximations or sampling. When the white-box subproblem is solvable exactly via global optimization---as when $\dim(x^{\WB})$ is moderate---surrogating $y$ adds modeling complexity without clear benefit. We instead surrogate the \emph{optimal value} $J(x^{\WB\star}, y, x^{\BB})$ directly, which yields a scalar GP in $\mathbb{R}^{n_{\BB}}$ and avoids both multi-output surrogates and uncertainty propagation (Table~\ref{tab:method_comparison}).
+All of these methods surrogate the \emph{intermediate} black-box outputs $y$ and propagate uncertainty through the white-box equations, requiring multi-output GPs and moment approximations or sampling. When the white-box subproblem is solvable exactly via NLP---as when $\dim(x^{\WB})$ is moderate---surrogating $y$ adds modeling complexity without clear benefit. We instead surrogate the \emph{optimal value} $J(x^{\WB\star}, y, x^{\BB})$ directly, which yields a scalar GP in $\mathbb{R}^{n_{\BB}}$ and avoids both multi-output surrogates and uncertainty propagation (Table~\ref{tab:method_comparison}).
 
 \subsection{Bilevel Optimization}
 
-Bilevel programming has a rich history in the global optimization literature. G\"{u}m\"{u}\c{s} and Floudas~\cite{gumus2001bilevel} developed the first rigorous global optimization approach for nonlinear bilevel problems using the $\alpha$BB framework. Mitsos, Chachuat, and Barton~\cite{mitsos2009bilevel_dynamic} extended this to bilevel dynamic optimization, Kleniati and Adjiman~\cite{kleniati2014bilevel} addressed the mixed-integer case, and Fa{\'\i}sca et al.~\cite{faisca2007bilevel} proposed parametric global optimization for bilevel programs via multi-parametric programming. These exact methods provide optimality guarantees but require analytical access to both levels---an assumption that breaks when the upper level involves an expensive black-box simulation.
+Bilevel programming has a rich history in the global optimization literature. G\"{u}m\"{u}\c{s} and Floudas~\cite{gumus2001bilevel} developed the first rigorous global optimization approach for nonlinear bilevel problems using the $\alpha$BB framework. Mitsos, Chachuat, and Barton~\cite{mitsos2009bilevel_dynamic} extended this to bilevel dynamic optimization, Kleniati and Adjiman~\cite{kleniati2014bilevel} addressed the mixed-integer case, and Fai\c{s}ca et al.~\cite{faisca2007bilevel} proposed parametric global optimization for bilevel programs via multi-parametric programming. These exact methods provide optimality guarantees but require analytical access to both levels---an assumption that breaks when the upper level involves an expensive black-box simulation.
 
 Data-driven approaches address this gap. The DOMINO framework of Beykal et al.~\cite{beykal2020domino} solves bilevel mixed-integer nonlinear problems by sampling the upper-level objective and solving the lower-level problem to global optimality at each sample point, using a grey-box optimization solver (ARGONAUT/NOMAD) for the upper-level search. DOMINO is the closest non-BO predecessor to our approach: it shares our architecture of exact lower-level solves with a data-driven upper-level search. The key distinction is that DOMINO uses deterministic surrogates for the upper level, whereas we use a GP with a principled acquisition function that balances exploration and exploitation---an advantage when the evaluation budget is small ($<$250 calls) and the risk of overexploiting early samples is high.
 
-Within the BO literature, Kieffer et al.~\cite{kieffer2017bilevel} first applied BO to bilevel problems, using EI at the outer level and Sequential Least Squares Programming (SLSQP) at the inner level. This nested architecture is structurally identical to ours, but Kieffer et al.\ did not exploit grey-box structure or dimensionality reduction. Recent work addresses the harder setting where \emph{both} levels are black boxes: Ekmekcioglu et al.~\cite{ekmekcioglu2024bilevel} model both levels as GPs over the joint space; Chew et al.~\cite{chew2025bilbo} construct confidence-bound trusted sets with regret guarantees; Fu et al.~\cite{fu2024convergence} provide convergence analysis for BO bilevel problems where the inner loop is unconstrained Stochastic Gradient Descent (SGD). When the inner problem is a known white-box NLP, solving it exactly is both cheaper and more accurate than learning a second surrogate.
+Within the BO literature, Kieffer et al.~\cite{kieffer2017bilevel} first applied BO to bilevel problems, using EI at the outer level and SLSQP at the inner level. This nested architecture is structurally identical to ours, but Kieffer et al.\ did not exploit grey-box structure or dimensionality reduction. Recent work addresses the harder setting where \emph{both} levels are black boxes: Ekmekcioglu et al.~\cite{ekmekcioglu2024bilevel} model both levels as GPs over the joint space; Chew et al.~\cite{chew2025bilbo} construct confidence-bound trusted sets with regret guarantees; Fu et al.~\cite{fu2024convergence} provide convergence analysis for BO bilevel problems where the inner loop is unconstrained SGD. When the inner problem is a known white-box NLP, solving it exactly is both cheaper and more accurate than learning a second surrogate.
 
-Baldea~\cite{baldea2026multiscale} introduced the multi-scale bilevel BO framework we extend here, demonstrating it on a single chemical process case study. We advance that work with a 13-problem benchmark suite, with systematic hyperparameter sweeps, and detailed comparisons quantifying when and why bilevel decomposition helps.
+Baldea~\cite{baldea2025multiscale} introduced the multi-scale bilevel BO framework we extend here, demonstrating it on a single CSTR case study. We advance that work with a 13-problem benchmark suite, with systematic hyperparameter sweeps, and detailed comparisons quantifying when and why bilevel decomposition helps.
 
 \subsection{Constraint Handling in Expensive Optimization}
 
-Standard constrained BO methods model constraints as expensive black-box functions, each requiring a separate GP. Gardner et al.~\cite{gardner2014} introduced weighted expected improvement for unknown constraints; Gelbart et al.~\cite{gelbart2014unknown} extended this with probability-of-feasibility weighting; Picheny et al.~\cite{picheny2016albo} proposed a slack-variable augmented Lagrangian approach. These methods are appropriate when constraint functions are truly unknown, but when constraints arise from known white-box equations---mass balances, safety envelopes, thermodynamic limits---creating surrogate models increases computational cost and introduces approximation error.
+Standard constrained BO methods model constraints as expensive black-box functions, each requiring a separate GP. Gardner et al.~\cite{gardner2014} introduced weighted expected improvement for unknown constraints; Gelbart et al.~\cite{gelbart2014unknown} extended this with probability-of-feasibility weighting; Picheny et al.~\cite{picheny2016albo} proposed a slack-variable augmented Lagrangian approach. These methods are appropriate when constraint functions are truly unknown, but when constraints arise from known white-box equations---mass balances, safety envelopes, thermodynamic limits---surrogating them wastes evaluations and introduces approximation error.
 
-Our inner global optimizer satisfies white-box constraints exactly, avoiding penalty functions, chance constraints, and moment approximations. The advantage is largest when feasible regions are tight: in such cases(reflected in the Distillation and Heat-Exchanger problems in Section~\ref{sec:experiments}), bilevel BO achieves $>$100{,}000$\times$ lower regret than penalty-based black-box BO.
+Our inner NLP satisfies white-box constraints exactly, avoiding penalty functions, chance constraints, and moment approximations. The advantage is largest when feasible regions are tight: on Distillation and Heat-Exchanger, bilevel BO achieves $>$100{,}000$\times$ lower regret than penalty-based black-box BO (Section~\ref{sec:results}).
 
 %% ============================================================================
 %% SECTION 3: PROBLEM FORMULATION (was Section 2)
@@ -142,29 +142,23 @@ We consider optimization problems in which an expensive black-box model is coupl
 
 The decision variables comprise two groups:
 \begin{itemize}
-    \item $x^{\WB} \in \mathbb{R}^{n_{\WB}}$: \emph{white-box variables} governed by known, differentiable equations (e.g., temperatures, pressures, flow rates in engineering; policy parameters in control; design dimensions in structural optimization). These variables enter the white-box model $f^{\WB}$, the objective $J$, and the inequality constraints $g$.
-    \item $x^{\BB} \in \mathbb{R}^{n_{\BB}}$: \emph{black-box variables} that parameterize an expensive, non-differentiable function $f^{\BB}$ (e.g., molecular descriptors requiring DFT, material properties from simulations, hyperparameters of a costly simulator). These variables enter $f^{\BB}$ directly and may also appear in $J$ and $g$.
+    \item $x^{\WB} \in \mathbb{R}^{n_{\WB}}$: \emph{white-box variables} governed by known, differentiable equations (e.g., temperatures, pressures, flow rates in engineering; policy parameters in control; design dimensions in structural optimization)
+    \item $x^{\BB} \in \mathbb{R}^{n_{\BB}}$: \emph{black-box variables} that parameterize an expensive, non-differentiable function (e.g., molecular descriptors requiring DFT, material properties from simulations, hyperparameters of a costly simulator)
 \end{itemize}
 
-The black-box model
+Parameters $y$ are computed by a black-box model
 \begin{equation}\label{eq:molecular_model}
-    y = f^{\BB}(x^{\BB}), \quad f^{\BB}: \mathbb{R}^{n_{\BB}} \to \mathbb{R}^{n_y},
+    y = f^{\BB}(x^{\BB}).
 \end{equation}
-maps $x^{\BB}$ to a vector of intermediate parameters $y \in \mathbb{R}^{n_y}$ that couple the black-box and white-box components. We assume $f^{\BB}$ is expensive to evaluate and that we lack closed-form expressions or derivative information for it.
+This function $f^{\BB}$ is expensive to evaluate; we lack closed-form expressions or derivative information for it.
 
-The white-box model takes the implicit form
+The white-box model generally takes the implicit form
 \begin{equation}\label{eq:process_model}
-    f^{\WB}(x^{\WB}, y) = 0, \quad f^{\WB}: \mathbb{R}^{n_{\WB}} \times \mathbb{R}^{n_y} \to \mathbb{R}^{n_{\WB}},
+    f^{\WB}(x^{\WB}, y) = 0,
 \end{equation}
-encoding known equations (e.g., mass and energy balances) that relate the white-box variables $x^{\WB}$ to the black-box outputs $y$. We assume $f^{\WB}$ is sufficiently smooth and that the Jacobian $\partial f^{\WB}/\partial x^{\WB}$ is available analytically.
+where $y \in \mathbb{R}^{n_y}$ is a vector of parameters that enter the white-box equations. We assume $f^{\WB}$ is sufficiently smooth and that the Jacobian $\partial f^{\WB}/\partial x^{\WB}$ is available analytically.
 
-The inequality constraints
-\begin{equation}\label{eq:g_definition}
-    g(x^{\WB}, y, x^{\BB}) \leq 0, \quad g: \mathbb{R}^{n_{\WB}} \times \mathbb{R}^{n_y} \times \mathbb{R}^{n_{\BB}} \to \mathbb{R}^{n_g},
-\end{equation}
-encode $n_g$ design specifications, safety limits, or feasibility requirements that may depend on both variable groups and the black-box outputs.
-
-The complete optimization problem over both variable groups is
+The integrated optimization problem over both variable groups is
 \begin{subequations}\label{eq:full_problem}
 \begin{align}
     \min_{x^{\WB}, x^{\BB}} \quad & J(x^{\WB}, y, x^{\BB}) \label{eq:objective}\\
@@ -185,13 +179,13 @@ Problem~\eqref{eq:full_problem} possesses a structural property that we formaliz
 Problem~\eqref{eq:full_problem} satisfies:
 \begin{enumerate}
     \item[(i)] The black-box function $f^{\BB}$ depends only on $x^{\BB}$. For any fixed $x^{\BB}$ and $y = f^{\BB}(x^{\BB})$, the resulting optimization over $x^{\WB}$ alone is a well-posed NLP. (The objective $J$ and constraints $g$ may depend on $x^{\BB}$ directly, not only through $y$; the separability is in the \emph{optimization structure}---the inner problem optimizes $x^{\WB}$ while $x^{\BB}$ and $y$ are held fixed.)
-    \item[(ii)] For any fixed $x^{\BB}$ and $y = f^{\BB}(x^{\BB})$, the white-box subproblem $\min_{x^{\WB}} J(x^{\WB}, y, x^{\BB})$ subject to $f^{\WB}(x^{\WB}, y) = 0$, $g(x^{\WB}, y, x^{\BB}) \leq 0$, $x^{\WB} \in \mathcal{X}^{\WB}$ is solvable to global optimality (of the subproblem) by a suitable global optimizer.
+    \item[(ii)] For any fixed $x^{\BB}$ and $y = f^{\BB}(x^{\BB})$, the white-box subproblem $\min_{x^{\WB}} J(x^{\WB}, y, x^{\BB})$ subject to $f^{\WB}(x^{\WB}, y) = 0$, $g(x^{\WB}, y, x^{\BB}) \leq 0$, $x^{\WB} \in \mathcal{X}^{\WB}$ is solvable to global optimality (of the subproblem) by a deterministic NLP solver.
 \end{enumerate}
 \end{assumption}
 
-Under Assumption~\ref{ass:separability}, the optimization can be decomposed as follows: for any fixed $x^{\BB}$, the black-box evaluation $y = f^{\BB}(x^{\BB})$ and the inner optimization over $x^{\WB}$ are self-contained. This decoupling is the structural feature we exploit: rather than optimizing all variables jointly, we can search over the low-dimensional black-box space while solving the white-box subproblem exactly at each step. Note that $f^{\BB}$ can always be augmented with identity mappings (e.g., $y_{n_y+1} = x^{\BB}_1$) to absorb any direct $x^{\BB}$ dependence in $J$ or $g$, so the distinction between ``depends on $x^{\BB}$ through $y$'' and ``depends on $x^{\BB}$ directly'' is a modeling choice, not a structural limitation.
+Under Assumption~\ref{ass:separability}, the optimization decomposes: for any fixed $x^{\BB}$, the black-box evaluation $y = f^{\BB}(x^{\BB})$ and the inner NLP over $x^{\WB}$ are self-contained. This decoupling is the structure we exploit: rather than optimizing all variables jointly, we can search over the low-dimensional black-box space while solving the white-box subproblem exactly at each step. Note that $f^{\BB}$ can always be augmented with identity mappings (e.g., $y_{n_y+1} = x^{\BB}_1$) to absorb any direct $x^{\BB}$ dependence in $J$ or $g$, so the distinction between ``depends on $x^{\BB}$ through $y$'' and ``depends on $x^{\BB}$ directly'' is a modeling choice, not a structural limitation.
 
-Despite this structure, problem~\eqref{eq:full_problem} resists standard solution methods for two reasons. First, the black-box nature of $f^{\BB}$ precludes using gradient-based NLP solvers. Finite-difference gradient approximations require $O(n_{\BB})$ evaluations of $f^{\BB}$ per iteration---prohibitive when each evaluation takes minutes to hours. Second, full-space surrogate-based optimization (EGO~\cite{jones1998efficient}, standard BO~\cite{frazier2018tutorial}) over $[x^{\WB}, x^{\BB}]$ builds a GP surrogate in $\mathbb{R}^{n_{\WB}+n_{\BB}}$, wasting samples on the known white-box response and suffering the curse of dimensionality as $n_{\WB}$ grows.
+Despite this structure, problem~\eqref{eq:full_problem} resists standard solution methods for two reasons. First, the black-box nature of $f^{\BB}$ precludes gradient-based NLP solvers. Finite-difference gradients require $O(n_{\BB})$ evaluations of $f^{\BB}$ per iteration---prohibitive when each evaluation takes minutes to hours. Second, full-space surrogate-based optimization (EGO~\cite{jones1998efficient}, standard BO~\cite{frazier2018tutorial}) over $[x^{\WB}, x^{\BB}]$ builds a GP surrogate in $\mathbb{R}^{n_{\WB}+n_{\BB}}$, wasting samples on the known white-box response and suffering the curse of dimensionality as $n_{\WB}+n_{\BB}$ grows.
 
 %% ============================================================================
 %% SECTION 4: METHOD
@@ -200,7 +194,7 @@ Despite this structure, problem~\eqref{eq:full_problem} resists standard solutio
 
 \subsection{Bilevel Reformulation}\label{subsec:bilevel_reformulation}
 
-Based on the assumptions in Section~\ref{subsec:separability} we reformulate~\eqref{eq:full_problem} as a bi-level optimization problem that separates what we know from what we must learn:
+We reformulate~\eqref{eq:full_problem} as a bi-level optimization problem that separates what we know from what we must learn:
 \begin{subequations}\label{eq:bilevel}
 \begin{align}
     \min_{x^{\BB}} \quad & J(x^{\WB\star}, y, x^{\BB}) \label{eq:outer_obj}\\
@@ -213,20 +207,19 @@ Based on the assumptions in Section~\ref{subsec:separability} we reformulate~\eq
 \end{align}
 \end{subequations}
 
-The \textbf{inner problem}~\eqref{eq:inner_obj}--\eqref{eq:inner_bounds} is a standard nonlinear program (NLP). Given fixed $x^{\BB}$ and $y = f^{\BB}(x^{\BB})$, it optimizes only the white-box variables $x^{\WB}$ using the white box model; $x^{\BB}$ and $y$ enter as parameters. Because the white-box equations are closed-form and inexpensive to evaluate, this subproblem can be solved to global optimality using a global optimizer such as differential evolution (DE).
+The \textbf{inner problem}~\eqref{eq:inner_obj}--\eqref{eq:inner_bounds} is a standard nonlinear program. Given fixed $x^{\BB}$ and $y = f^{\BB}(x^{\BB})$, it optimizes only the white-box variables $x^{\WB}$ using the analytical model; $x^{\BB}$ and $y$ enter as parameters. This subproblem can be solved efficiently with conventional NLP solvers that exploit gradient and Hessian information.
 
-The \textbf{outer problem}~\eqref{eq:outer_obj}--\eqref{eq:outer_blackbox} searches over black-box decisions $x^{\BB}$. For each candidate $x^{\BB}$, we evaluate the black box to obtain $y$, solve the inner problem to global optimality to get $x^{\WB\star}$, and record the resulting objective value $J(x^{\WB\star}, y, x^{\BB})$. This outer loop is where we apply Bayesian optimization.
+The \textbf{outer problem}~\eqref{eq:outer_obj}--\eqref{eq:outer_blackbox} searches over black-box decisions $x^{\BB}$. For each candidate $x^{\BB}$, we evaluate the black box to obtain $y$, solve the inner NLP to get $x^{\WB\star}$, and record the resulting objective value $J(x^{\WB\star}, y, x^{\BB})$. This outer loop is where we apply Bayesian optimization.
 
 \begin{remark}
-The key advantage is dimensionality reduction. The BO surrogate now operates over $\mathbb{R}^{n_{BB}}$ rather than $\mathbb{R}^{n_{WB} + n_{BB}}$. When $n_{BB} \ll n_{WB}$, the number of black-box evaluations required to build an accurate surrogate drops substantially relative to applying BO to problem~(\ref{eq:full_problem}).
+The key advantage is dimensionality reduction. The BO surrogate now operates over $\mathbb{R}^{n_{BB}}$ rather than $\mathbb{R}^{n_{WB} + n_{BB}}$. Since typically $n_{BB} \ll n_{WB}$, the number of black-box evaluations required to build an accurate surrogate drops substantially.
 \end{remark}
 
 \begin{remark}
 If the inner problem~\eqref{eq:inner_obj}--\eqref{eq:inner_bounds} is infeasible for some $y$, we return a large penalty value. The BO acquisition function will naturally steer away from black-box variable choices that lead to infeasible white-box solutions.
 \end{remark}
 
-% \subsection{Algorithm}\label{subsec:algorithm}
-\subsection{Algorithm, Surrogate Model, and Acquisition Function}\label{subsec:algorithm}
+\subsection{Algorithm}\label{subsec:algorithm}
 
 \begin{algorithm}[htbp]
 \caption{Bilevel Bayesian Optimization}\label{alg:bilevel_bo}
@@ -237,7 +230,7 @@ If the inner problem~\eqref{eq:inner_obj}--\eqref{eq:inner_bounds} is infeasible
 \State Sample $\{x^{\BB}_i\}_{i=1}^{n_\text{init}}$ via Latin hypercube in $\mathcal{X}^{\BB}$
 \For{$i = 1, \ldots, n_\text{init}$}
     \State Evaluate $y_i = f^{\BB}(x^{\BB}_i)$
-    \State Solve inner problem (DE): $x^{\WB\star}_i = \arg\min_{x^{\WB}} J(x^{\WB}, y_i, x^{\BB}_i)$ s.t.\ $f^{\WB}(x^{\WB}, y_i)=0$, $g(x^{\WB}, y_i, x^{\BB}_i) \leq 0$
+    \State Solve inner NLP: $x^{\WB\star}_i = \arg\min_{x^{\WB}} J(x^{\WB}, y_i, x^{\BB}_i)$ s.t.\ $f^{\WB}(x^{\WB}, y_i)=0$, $g(x^{\WB}, y_i, x^{\BB}_i) \leq 0$
     \State Record $J_i = J(x^{\WB\star}_i)$ (or penalty if infeasible)
 \EndFor
 \Statex \textit{// BO loop}
@@ -245,7 +238,7 @@ If the inner problem~\eqref{eq:inner_obj}--\eqref{eq:inner_bounds} is infeasible
     \State Fit GP surrogate $\mathcal{GP}$ to $\{(x^{\BB}_i, J_i)\}_{i=1}^{t-1}$
     \State Select $x^{\BB}_t = \arg\max_{x^{\BB} \in \mathcal{X}^{\BB}} \alpha_\text{EI}(x^{\BB}; \mathcal{GP}, \xi)$
     \State Evaluate $y_t = f^{\BB}(x^{\BB}_t)$
-    \State Solve inner problem (DE) $\to x^{\WB\star}_t$, record $J_t$
+    \State Solve inner NLP $\to x^{\WB\star}_t$, record $J_t$
     \State Update dataset
 \EndFor
 \State \Return best $(x^{\BB\star}, x^{\WB\star}, J^\star)$
@@ -306,7 +299,7 @@ If the inner problem~\eqref{eq:inner_obj}--\eqref{eq:inner_bounds} is infeasible
             inner sep=15pt,
             align=left,
             font=\large,
-            minimum width=6cm,
+            minimum width=7cm,
             minimum height=4cm
         },
         inner title tab/.style={
@@ -324,12 +317,12 @@ If the inner problem~\eqref{eq:inner_obj}--\eqref{eq:inner_bounds} is infeasible
     };
     \node[title tab] at (outer.north west) {Outer Problem (BO)};
 
-    \node[black box, anchor=north west] (blackbox) at ([yshift=-2cm, xshift=1.7cm]outer.south west) {
+    \node[black box, anchor=north west] (blackbox) at ([yshift=-2cm, xshift=2cm]outer.south west) {
         Black-box Function \\[1em]
         $y_{n+1} = f^{BB}(x_{n+1}^{BB})$
     };
 
-    \node[inner box, right=1.3cm of blackbox] (inner) {
+    \node[inner box, right=1.5cm of blackbox] (inner) {
         Solve given $x_{n+1}^{BB}$, $y_{n+1}$: \\[0.8em]
         \quad $\begin{aligned}
             x_{n+1}^{WB*} = \arg \min_{x^{WB}} J(x^{WB}, y_{n+1}, x_{n+1}^{BB}) \\
@@ -337,7 +330,7 @@ If the inner problem~\eqref{eq:inner_obj}--\eqref{eq:inner_bounds} is infeasible
             g(x^{WB}, y_{n+1}, x_{n+1}^{BB}) &\leq 0
         \end{aligned}$
     };
-    \node[inner title tab] at (inner.north west) {Inner Problem (DE)};
+    \node[inner title tab] at (inner.north west) {Inner Problem (NLP)};
 
     \draw[->, line width=6pt, outerborder, -{Latex[length=6mm, width=8mm]}]
         ([xshift=0.5cm]outer.south west) |- (blackbox.west);
@@ -375,12 +368,13 @@ If the inner problem~\eqref{eq:inner_obj}--\eqref{eq:inner_bounds} is infeasible
     % \end{scope}
 
     \end{tikzpicture}
-    \caption{Flow of the multi-scale Bayesian optimization framework. The outer loop uses BO to select black-box variables $x^{\BB}$, which are evaluated through the black-box model to produce parameters $y$. The inner loop solves the white-box optimization over $x^{\WB}$ via differential evolution given $x^{\BB}$ and $y$, returning the optimal objective $J(x^{\WB\star}, y, x^{\BB})$ to update the BO surrogate.}
+    \caption{Flow of the multi-scale Bayesian optimization framework. The outer loop uses BO to select black-box variables $x^{\BB}$, which are evaluated through the black-box model to produce parameters $y$. The inner loop solves an NLP over white-box variables $x^{\WB}$ given $x^{\BB}$ and $y$, returning the optimal objective $J(x^{\WB\star}, y, x^{\BB})$ to update the BO surrogate.}
     \label{fig:multiscale_diagram}
 \end{figure}
 
-% \subsection{Surrogate Model and Acquisition Function}\label{subsec:surrogate_and_acquisition}
-We describe the proposed approach in Algorithm~\ref{alg:bilevel_bo} and Figure~\ref{fig:multiscale_diagram} and provide a discussion as follows: The GP surrogate in Algorithm~\ref{alg:bilevel_bo} models the scalar mapping $J(x^{\WB\star}(x^{\BB}), f^{\BB}(x^{\BB}), x^{\BB}):\mathbb{R}^{n_\BB} \times \mathbb{R}^{n_y} \times \mathbb{R}^{n_\WB} \mapsto \mathbb{R}$---a function of $x^{\BB}$ alone. In our implementation, we use a Gaussian process with an automatic relevance determination (ARD) radial basis function (RBF) kernel, where a separate length scale per dimension allows the GP to adapt to anisotropic landscapes. The outer loop selects the next evaluation by maximizing Expected Improvement (EI) with exploration parameter $\xi \geq 0$. Kernel and acquisition function details for our implementation are in Appendices~\ref{sec:gp_details} and~\ref{sec:acquisition_functions}; here we emphasize that both are standard---the gains reported in Section~\ref{sec:results} come from problem structure, not from novel surrogate or acquisition choices, although we expect that adopting them would yield further benefits.
+\subsection{Surrogate Model and Acquisition Function}\label{subsec:surrogate_and_acquisition}
+
+The GP surrogate in Algorithm~\ref{alg:bilevel_bo} models the scalar mapping $x^{\BB} \mapsto J(x^{\WB\star}(x^{\BB}), f^{\BB}(x^{\BB}), x^{\BB})$---a function of $x^{\BB}$ alone. We use a Gaussian process with an automatic relevance determination (ARD) radial basis function (RBF) kernel, where a separate length scale per dimension allows the GP to adapt to anisotropic landscapes. The outer loop selects the next evaluation by maximizing Expected Improvement (EI) with exploration parameter $\xi \geq 0$. Kernel and acquisition function details are in Appendices~\ref{sec:gp_details} and~\ref{sec:acquisition_functions}; here we emphasize that both are standard---the gains reported in Section~\ref{sec:results} come from problem structure, not from novel surrogate or acquisition choices.
 
 \subsection{Key Properties}\label{subsec:key_properties}
 
@@ -390,9 +384,9 @@ The bilevel reformulation~\eqref{eq:bilevel} has several properties worth highli
 Under Assumption~\ref{ass:separability}, the bilevel reformulation~\eqref{eq:bilevel} preserves the global optimum of~\eqref{eq:full_problem} and reduces the GP surrogate domain from $\mathbb{R}^{n_{\WB}+n_{\BB}}$ to $\mathbb{R}^{n_{\BB}}$.
 \end{proposition}
 
-\noindent The proof is in Appendix~\ref{sec:proof_dimensionality}. The key consequences are threefold:
+\noindent The proof is in Appendix~\ref{sec:proof_dimensionality}. The key consequence is threefold:
 
-\emph{Exact constraint satisfaction.} Constraints $g(x^{\WB}, y, x^{\BB}) \leq 0$ are handled by the inner global optimizer, not by penalty functions or chance constraints. The GP never needs to learn the constraint boundary. When the inner optimizer converges to a globally feasible point (Assumption~\ref{ass:separability}(ii)), feasibility is guaranteed. In our implementation, differential evolution with L-BFGS-B polishing provides high-confidence global solutions; further guarantees could be obtained with deterministic global solvers (e.g., BARON), as discussed in Section~\ref{sec:discussion}.
+\emph{Exact constraint satisfaction.} Constraints $g(x^{\WB}, y, x^{\BB}) \leq 0$ are handled by the inner NLP solver, not by penalty functions or chance constraints. The GP never needs to learn the constraint boundary. When the inner NLP converges to a globally feasible point (Assumption~\ref{ass:separability}(ii)), feasibility is guaranteed; in practice, local solvers such as SLSQP with multi-start may find infeasible local optima on non-convex inner problems, as discussed in Section~\ref{sec:discussion}.
 
 \emph{Scalar surrogate.} The method requires only one GP for the scalar optimal objective $J(x^{\WB\star}, y, x^{\BB})$. Approaches that surrogate the black-box outputs $y \in \mathbb{R}^{n_y}$ instead require a multi-output GP, with the associated challenges of cross-covariance specification and $O(n_y^3)$ scaling.
 
@@ -414,23 +408,23 @@ What is surrogated & $x^{\BB} \mapsto J^\star$ & $x^{\BB} \mapsto y$ & $x \mapst
 Surrogate type & scalar GP & multi-output GP & vector GP & scalar GP \\
 Surrogate dimension & $n_{\BB}$ & $n_{\BB}$ & $n_{\WB}+n_{\BB}$ & $n_{\WB}+n_{\BB}$ \\
 Variables separated? & Yes & Yes & No & No \\
-Constraint handling & exact (global opt.) & chance constraints & penalty & penalty \\
-Inner optimization & global optimization (DE) & moment propagation & none & none \\
-$y$-dependent constraints & via inner optimizer & natively & penalty & penalty \\
+Constraint handling & exact (NLP) & chance constraints & penalty & penalty \\
+Inner optimization & exact NLP & moment propagation & none & none \\
+$y$-dependent constraints & via NLP & natively & penalty & penalty \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:method_comparison} summarizes the distinctions between the proposed method and a subset of the methods reviwed in Section~\ref{sec:related_work} that are most directly related and relevant. Both bilevel BO and COBALT achieve the same input dimensionality reduction to $n_{\BB}$. The distinction is in the surrogate output (scalar vs.\ multi-output GP) and constraint handling (exact global optimization vs.\ moment approximation), not the input dimension. COBALT and BOCF surrogate intermediate black-box outputs $y$ and propagate uncertainty through the white-box equations, requiring multi-output GPs and moment approximations. Our method surrogates the scalar optimal objective $J(x^{\WB\star})$ directly, at the cost of an inner global optimization solve per outer iteration. When the white-box model is moderately sized and the black-box evaluation is the primary computational expense, this overhead is negligible. The approaches are complementary: COBALT handles $y$-dependent constraints natively and enables risk-averse decisions via uncertainty propagation; BOCF handles non-separable composite functions. Our method trades their generality for simplicity and exactness when Assumption~\ref{ass:separability} holds.
+Table~\ref{tab:method_comparison} summarizes the distinctions. Both bilevel BO and COBALT achieve the same input dimensionality reduction to $n_{\BB}$. The distinction is in the surrogate output (scalar vs.\ multi-output GP) and constraint handling (exact NLP vs.\ moment approximation), not the input dimension. COBALT and BOCF surrogate intermediate black-box outputs $y$ and propagate uncertainty through the white-box equations, requiring multi-output GPs and moment approximations. Our method surrogates the scalar optimal objective $J(x^{\WB\star})$ directly, at the cost of an NLP solve per outer iteration. When the white-box model is moderately sized and the black-box evaluation dominates cost, this overhead is negligible. The approaches are complementary: COBALT handles $y$-dependent constraints natively and enables risk-averse decisions via uncertainty propagation; BOCF handles non-separable composite functions. Our method trades their generality for simplicity and exactness when Assumption~\ref{ass:separability} holds.
 
 %% ============================================================================
 %% SECTION 5: BENCHMARK SUITE
 %% ============================================================================
-\section{Benchmark Problem Suite}\label{sec:benchmark_suite}
+\section{Benchmark Suite}\label{sec:benchmark_suite}
 
-We propose a suite of 13 problems spanning synthetic test functions and engineering domains, summarized in Table~\ref{tab:benchmark_summary}. Full mathematical formulations are in Appendix~\ref{sec:test_problems}.The suite is designed around five principles: (1)~every problem has a verified global optimum (Appendix~\ref{sec:optimum_verification}); (2)~constraints are physically motivated; (3)~black-box functions encode realistic structure-property relationships (Sabatier volcano curves, Langmuir isotherms, Robeson upper bounds, Hansen solubility); (4)~problems span a range of difficulty (unconstrained to 3 constraints, 2D to 5D, min and max); and (5)~all problems are cheap to evaluate, enabling the 10{,}920-run statistical comparison in Section~\ref{sec:results}.
+No existing benchmark suite targets the separable grey-box structure of Assumption~\ref{ass:separability}: an outer black-box mapping $y = f^{\BB}(x^{\BB})$ coupled with an inner white-box optimization over $x^{\WB}$, subject to inequality constraints. Existing suites for composite BO~\cite{astudillo2019bocf} do not separate variables; those used in grey-box BO~\cite{paulson2022cobalt} contain only a handful of problems; and standard global optimization testbeds (CEC, COCO/BBOB) lack bilevel structure entirely. We propose a suite of 13 problems spanning synthetic test functions and engineering domains, summarized in Table~\ref{tab:benchmark_summary}. Full mathematical formulations are in Appendix~\ref{sec:test_problems}.
 
-To our knowledge, no existing benchmark suite targets a separable grey-box structure that reflects Assumption~\ref{ass:separability}: an outer black-box mapping $y = f^{\BB}(x^{\BB})$ coupled with an inner white-box optimization over $x^{\WB}$, subject to inequality constraints. Existing problem suites for composite BO~\cite{astudillo2019bocf} do not separate variables; those used in grey-box BO~\cite{paulson2022cobalt} contain only a handful of problems; and standard global optimization testbeds such as the IEEE Congress on Evolutionary Computation (CEC) benchmarks~\cite{suganthan2005cec} and the Comparing Continuous Optimizers (COCO) platform with its Black-Box Optimization Benchmarking (BBOB) suite~\cite{hansen2021coco} lack bilevel structure entirely. 
+\subsection{Problem Summary}\label{subsec:problem_summary}
 
 \begin{table}[htbp]
 \centering
@@ -447,7 +441,7 @@ Toy-Hydrology & 1 & 1 & 1 & 2 & min & Hydrology \\
 Rosen-Suzuki & 2 & 2 & 2 & 3 & min & Constrained \\
 \midrule
 CSTR & 3 & 2 & 3 & 2 & max & Catalysis \\
-Heat-Exchanger & 3 & 2 & 3 & 2 & min & Heat Exchanger Network design \\
+Heat-Exchanger & 3 & 2 & 3 & 2 & min & HEN design \\
 PSA & 3 & 2 & 3 & 2 & min & Adsorption \\
 Batch-Reactor & 3 & 2 & 3 & 2 & min & Kinetics \\
 Distillation & 3 & 2 & 3 & 3 & min & Separation \\
@@ -458,13 +452,15 @@ Williams-Otto & 3 & 2 & 2 & 2 & max & Process opt.\ \\
 \end{tabular}
 \end{table}
 
+\subsection{Design Principles}\label{subsec:design_principles}
 
+The suite is designed around five principles: (1)~every problem has a verified global optimum (Appendix~\ref{sec:optimum_verification}); (2)~constraints are physically motivated; (3)~black-box functions encode realistic structure-property relationships (Sabatier volcano curves, Langmuir isotherms, Robeson upper bounds, Hansen solubility); (4)~problems span a range of difficulty (unconstrained to 3 constraints, 2D to 5D, min and max); and (5)~all problems are cheap to evaluate, enabling the 10{,}920-run statistical comparison in Section~\ref{sec:results}.
 
 \subsection{Representative Problems}\label{subsec:representative_problems}
 
 We highlight two problems; full formulations for all 13 appear in Appendix~\ref{sec:test_problems}.
 % \noindent\textbf{Small-Feasible-Region Peovlwma (Appendix~\ref{subsec:app_sfr1}).}
-Adapted from Gardner et al.~\cite{gardner2014} and Ariafar et al.~\cite{Ariafar2019}, these 2D constrained minimization problems feature small, disconnected feasible regions. The two-dimensional structure permits direct visualization of the search behavior (Section~\ref{subsec:sfr_results}).
+Adapted from Gardner et al.~\cite{gardner2014} and Ariafar et al.~\cite{Ariafar2019}, these 2D problems minimize the constraints of these problems create small, disconnected feasible regions. The two-dimensional structure permits direct visualization of the search behavior (Section~\ref{subsec:sfr_results}).
 
 % \noindent\textbf{CSTR with Catalyst Design (Appendix~\ref{subsec:app_cstr}).}
 % This 5D problem maximizes yield of intermediate $B$ in consecutive reactions $A \to B \to C$. Three white-box variables (temperature, pressure, residence time) are governed by Arrhenius kinetics and CSTR mass balances; two black-box variables (binding energy, activation-energy shift) map to kinetic parameters via a Sabatier volcano curve. Two constraints enforce byproduct limits and a safety envelope. This is representative of the eight engineering problems in the suite.
@@ -480,11 +476,11 @@ Adapted from Gardner et al.~\cite{gardner2014} and Ariafar et al.~\cite{Ariafar2
 
 We compare three solvers that represent different ways of handling the grey-box structure in problem~\eqref{eq:full_problem}.
 
-The first solver, \textbf{black-box DE}, applies SciPy's differential evolution (DE) solver over the full variable space $[x^{\WB}, x^{\BB}]$ with a population size multiplier of 15 and L-BFGS-B polishing. Constraints are handled via \texttt{NonlinearConstraint} with $g \leq 0$. This solver provides a global-search baseline: DE is gradient-free and explores the full feasible region without requiring derivative access to the black-box model. However, it evaluates $f^{\BB}$ at every candidate in the population at every generation, so the total number of black-box evaluations grows rapidly with dimension.
+The first solver, \textbf{black-box NLP}, treats $f^{\BB}$ as a numerically differentiable function and applies multi-start SLSQP over the full variable space $[x^{\WB}, x^{\BB}]$. We use 20 random restarts drawn from a Latin hypercube design. This solver provides an ``oracle'' baseline: it has gradient access (via finite differences) to both the white-box and black-box models. In practice, finite-differencing the black box requires $O(n_{\BB})$ evaluations per gradient step, so this approach is expensive when $f^{\BB}$ is costly.
 
-The second solver, \textbf{black-box BO (BB-BO)}, applies standard Bayesian optimization over the full $(n_{\WB}+n_{\BB})$-dimensional space. A single GP surrogate models the mapping $[x^{\WB}, x^{\BB}] \mapsto J$. Constraints are handled via a penalty function. This solver ignores the separable structure entirely and serves as the BO baseline.
+The second solver, \textbf{black-box BO}, applies standard Bayesian optimization over the full $(n_{\WB}+n_{\BB})$-dimensional space. A single GP surrogate models the mapping $[x^{\WB}, x^{\BB}] \mapsto J$. Constraints are handled via a penalty function. This solver ignores the separable structure entirely and serves as the BO baseline.
 
-The third solver, \textbf{bilevel BO (Bi-BO)}, is the proposed method. It places the GP surrogate over only the $n_{\BB}$-dimensional black-box space and solves the constrained white-box subproblem globally using DE, as described in Algorithm~\ref{alg:bilevel_bo}.
+The third solver, \textbf{bilevel BO}, is the proposed method. It places the GP surrogate over only the $n_{\BB}$-dimensional black-box space and solves the white-box subproblem exactly via NLP at each iteration, as described in Algorithm~\ref{alg:bilevel_bo}.
 
 All three solvers use Expected Improvement (EI) as the acquisition function for the BO variants. Both BO solvers share the same ARD RBF kernel and GP configuration (Appendix~\ref{sec:gp_details}). We sweep over initial sample sizes $n_\text{init} \in \{1, 5, 20, 50\}$ and exploration parameters $\xi \in \{0.001, \ldots, 1.0\}$, yielding 7{,}410 independent runs across all 13 problems (Appendix~\ref{sec:hyperparameter_details}).
 
@@ -500,27 +496,27 @@ We begin with the two Small-Feasible-Region problems because their two-dimension
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{figs/sfr1_search.eps}
-    \caption{Small-Feasible-Region~1: search behavior of black-box BO (left) and bilevel BO (right) after 50 initial samples + 200 BO iterations. Background: objective $J(x^{\WB}, y)$ (yellow = low); white regions are infeasible; hatching marks feasible islands; $\star$ marks the global optimum. Black-box BO scatters queries across the full $(x^{\WB}, x^{\BB})$ space. Bilevel BO operates along the $x^{\BB}$ axis---each query selects an $x^{\BB}$ value, and the inner DE solver finds the best feasible $x^{\WB}$.}
+    \caption{Small-Feasible-Region~1: search behavior of black-box BO (left) and bilevel BO (right) after 50 initial samples + 200 BO iterations. Background: objective $J(x^{\WB}, y)$ (yellow = low); white regions are infeasible; hatching marks feasible islands; $\star$ marks the global optimum. Black-box BO scatters queries across the full $(x^{\WB}, x^{\BB})$ space. Bilevel BO concentrates along the $x^{\BB}$ axis---each query selects an $x^{\BB}$ value, and the inner NLP finds the best feasible $x^{\WB}$.}
     \label{fig:sfr1_search}
 \end{figure}
 
-Figure~\ref{fig:sfr1_search} shows the key difference. In SFR-1, the black-box function is the identity ($y = x^{\BB}$), so the bilevel decomposition reduces to: given a candidate $y$-value from the outer loop, find the $x^{\WB}$ that minimizes $\sin(x^{\WB}) + y$ within the feasible set. The inner DE solver handles constraint satisfaction exactly, so every bilevel BO query lands in a feasible region. Black-box BO, by contrast, must jointly learn the objective function landscape \emph{and} the constraint boundary in two dimensions, wasting many samples in infeasible regions.
+Figure~\ref{fig:sfr1_search} shows the key difference. In SFR-1, the black-box function is the identity ($y = x^{\BB}$), so the bilevel decomposition reduces to: given a candidate $y$-value from the outer loop, find the $x^{\WB}$ that minimizes $\sin(x^{\WB}) + y$ within the feasible set. The inner NLP handles constraint satisfaction exactly, so every bilevel BO query lands in a feasible region. Black-box BO, by contrast, must jointly learn the objective landscape \emph{and} the constraint boundary in two dimensions, wasting many samples in infeasible regions.
 
 % SFR-2 search figure
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{figs/sfr2_search.eps}
-    \caption{Small-Feasible-Region~2: same layout as Figure~\ref{fig:sfr1_search}. Here the black-box function is nonlinear ($y = \frac{x^{\BB}-5.5}{2}\exp(x^{\BB}/2)$), distorting the relationship between $x^{\BB}$ and the feasible set. Bilevel BO still operates near the optimum because the GP surrogate learns the scalar mapping $x^{\BB} \mapsto J(x^{\WB\star})$ in one dimension.}
+    \caption{Small-Feasible-Region~2: same layout as Figure~\ref{fig:sfr1_search}. Here the black-box function is nonlinear ($y = \frac{x^{\BB}-5.5}{2}\exp(x^{\BB}/2)$), distorting the relationship between $x^{\BB}$ and the feasible set. Bilevel BO still concentrates near the optimum because the GP surrogate learns the scalar mapping $x^{\BB} \mapsto J(x^{\WB\star})$ in one dimension.}
     \label{fig:sfr2_search}
 \end{figure}
 
-SFR-2 (Figure~\ref{fig:sfr2_search}) introduces a nonlinear black-box function, making the mapping from $x^{\BB}$ to the feasible objective landscape more complex. The same mechanism applies: the outer loop proposes $x^{\BB}$, the black box function is used to compute $y$, and the inner DE solver finds the best feasible $x^{\WB}$. The GP surrogate now models a one-dimensional function $x^{\BB} \mapsto J(x^{\WB\star})$ rather than the two-dimensional objective-plus-constraint landscape that black-box BO must learn.
+SFR-2 (Figure~\ref{fig:sfr2_search}) introduces a nonlinear black-box function, making the mapping from $x^{\BB}$ to the feasible objective landscape more complex. The same mechanism applies: the outer loop proposes $x^{\BB}$, the black box computes $y$, and the inner NLP finds the best feasible $x^{\WB}$. The GP surrogate now models a one-dimensional function $x^{\BB} \mapsto J(x^{\WB\star})$ rather than the two-dimensional objective-plus-constraint landscape that black-box BO must learn.
 
 % SFR convergence curves
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{figs/sfr_convergence.eps}
-    \caption{Regret convergence for the two Small-Feasible-Region problems. Each curve uses $n_\text{init}=50$ initial Latin hypercube samples and the EI exploration parameter $\xi$ that yielded the lowest final regret. The dashed line marks the end of initialization. Solid lines show the mean over 10 independent repetitions; shaded bands show $\pm 1$ standard deviation. Bilevel BO (red) converges 1--2 orders of magnitude below black-box BO (blue) on both problems.}
+    \caption{Regret convergence for the two Small-Feasible-Region problems ($n_\text{init}=50$, best $\xi$, mean $\pm 1$ std over 10 repetitions). The dashed line marks the end of initialization. Bilevel BO (red) converges 1--2 orders of magnitude below black-box BO (blue) on both problems.}
     \label{fig:sfr_convergence}
 \end{figure}
 
@@ -534,7 +530,7 @@ The pattern observed on the SFR problems extends to all 13 benchmarks. Table~\re
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{figs/convergence_grid.pdf}
-    \caption{Regret convergence for the 11 benchmark problems not shown in Figure~\ref{fig:sfr_convergence}. Bilevel BO (red) converges to values that are 1--4 orders of magnitude below black-box BO (blue) on every problem. Each curve uses $n_\text{init}=50$ initial Latin hypercube samples and the EI exploration parameter $\xi$ that yielded the lowest final regret for that problem (see Appendix~\ref{sec:hyperparameter_details} for per-problem values). Solid lines show the mean over 10 independent repetitions; shaded bands show $\pm 1$ standard deviation.}
+    \caption{Log$_{10}$ regret convergence curves for the 11 benchmark problems not shown in Figure~\ref{fig:sfr_convergence}. Bilevel BO (red) converges 1--4 orders of magnitude below black-box BO (blue) on every problem. Settings: $n_\text{init}=50$, best $\xi$ per problem, mean $\pm 1$ std over 10 repetitions.}
     \label{fig:convergence_grid}
 \end{figure}
 
@@ -565,9 +561,9 @@ Williams-Otto           & 5 & 0.0000 & 2.2550    & 0.0000   & 115{,}769$\times$ 
 \end{tabular}
 \end{table}
 
-Bilevel BO achieves 14$\times$--277{,}000$\times$ lower regret than black-box BO across all 13 problems. The gap opens early and widens: bilevel BO separates from black-box BO within 20--50 iterations on most problems. The largest gains (Heat-Exchanger: 277{,}000$\times$, Distillation: 173{,}000$\times$) occur where tight constraints hinder the penalty-based approach---the same mechanism illustrated by the SFR figures, but now in five dimensions where the advantage of exact constraint satisfaction compounds with dimensionality reduction. The smallest gains (Rosen-Suzuki: 14$\times$, Evaporator: 19$\times$) occur where the inner white-box subproblem---solved via differential evolution with L-BFGS-B polishing---has multiple local optima that prevent the solver from reliably reaching the global optimum, or where the constraint set is loose.
+Bilevel BO achieves 14$\times$--277{,}000$\times$ lower regret than black-box BO across all 13 problems. The gap opens early and widens: bilevel BO separates from black-box BO within 20--50 iterations on most problems. The largest gains (Heat-Exchanger: 277{,}000$\times$, Distillation: 173{,}000$\times$) occur where tight constraints punish the penalty-based approach---the same mechanism illustrated by the SFR figures, but now in five dimensions where the advantage of exact constraint satisfaction compounds with dimensionality reduction. The smallest gains (Rosen-Suzuki: 14$\times$, Evaporator: 19$\times$) occur where the inner NLP has multiple local optima or the constraint set is loose.
 
-The full-space DE baseline---which applies differential evolution over the joint $[x^{\WB}, x^{\BB}]$ space with population size 15 and L-BFGS-B polishing---fails on two problems: Rastrigin, where multimodality in the combined space challenges even global solvers, and Small-Feasible-Region-2, where the narrow feasible region limits convergence. Bilevel BO matches or approaches DE baseline quality on the remaining 11 problems using $\sim$250 black-box evaluations versus the substantially higher evaluation counts required by full-space DE. All 13 pairwise comparisons (bilevel vs.\ black-box BO) are statistically significant ($p < 0.01$, Wilcoxon signed-rank test, 10 repetitions).
+The NLP baseline fails on two problems: Rastrigin, where multimodality traps gradient-based solvers, and Small-Feasible-Region-2, where the narrow feasible region defeats finite-difference gradients. Bilevel BO matches or approaches NLP quality on the remaining 11 problems using $\sim$250 black-box evaluations versus 900--3{,}000 for the 20-restart NLP. All 13 pairwise comparisons (bilevel vs.\ black-box BO) are statistically significant ($p < 0.01$, Wilcoxon signed-rank test, 10 repetitions).
 
 \subsection{Convergence Speed}\label{subsec:convergence_speed}
 
@@ -575,44 +571,52 @@ Where both methods reach 1\% of initial regret, bilevel BO converges 1.5$\times$
 
 \subsection{Scaling and Robustness}\label{subsec:scaling_robustness}
 
+\subsubsection{Dimensionality Scaling}\label{subsec:dimensionality_scaling}
 
-To verify that the bilevel advantage is not an artifact of a particular hyperparameter setting, Figure~\ref{fig:scatter_bb_vs_bi} plots final regret for every (problem, $n_\text{init}$, $\xi$) configuration. Every point lies below the diagonal, confirming that bilevel BO significantly outperforms black-box BO across all 364 configurations tested.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\textwidth]{figs/dimensionality_scaling.pdf}
+    \caption{Regret ratio (BB-BO / Bi-BO) vs.\ total problem dimension. The advantage of bilevel BO grows with dimension: 2D problems show 76--6{,}500$\times$ improvement; 5D problems show up to 277{,}000$\times$.}
+    \label{fig:dimensionality_scaling}
+\end{figure}
+
+The upward trend in Figure~\ref{fig:dimensionality_scaling} is expected---bilevel BO searches $n_{\BB}=1$--2 dimensions regardless of total problem size---but the spread at 5D is instructive: constraint activity and landscape ruggedness cause the ratio to vary from 19$\times$ (Evaporator) to 277{,}000$\times$ (Heat-Exchanger) at the same total dimension. Figure~\ref{fig:scatter_bb_vs_bi} confirms that this dominance holds across all hyperparameter settings: every (problem, $n_\text{init}$, $\xi$) configuration lies below the diagonal.
 
 % Scatter plot
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.5\textwidth]{figs/scatter_bb_vs_bi.pdf}
-    \caption{Scatter plot of final regret: black-box BO vs.\ bilevel BO. Each point is one (problem, $n_\text{init}$, $\xi$) configuration. All points lie below the diagonal, confirming that bilevel BO significantly outperforms BB-BO regardless of hyperparameter choice.}
+    \caption{Scatter plot of final regret: black-box BO vs.\ bilevel BO. Each point is one (problem, $n_\text{init}$, $\xi$) configuration. All points lie below the diagonal.}
     \label{fig:scatter_bb_vs_bi}
 \end{figure}
 
-\subsubsection{Hyperparameter Sensitivity}\label{subsec:robustness}
+\subsubsection{Computational Cost}\label{subsec:computational_cost}
 
-Figure~\ref{fig:ninit_robustness} examines sensitivity to the number of initial samples. Bilevel BO performance is nearly flat across $n_\text{init} \in \{1, 5, 20, 50\}$ (numerical values in Appendix Table~\ref{tab:ninit_sensitivity}): even $n_\text{init}=1$---a single initial sample---performs comparably to $n_\text{init}=50$, suggesting that few expensive initial evaluations suffice when $f^{\BB}$ is costly.
+Both BO methods require $\sim$20--30s wall time for 200 iterations on 12 of 13 problems, as the lower-dimensional GP in bilevel BO roughly offsets the inner NLP cost. The exception is Williams-Otto (111s vs.\ 26s), where the inner NLP solves a 6-species steady-state mass balance at each iteration. Both BO methods use $\sim$205 black-box evaluations---an order of magnitude fewer than the 900--3{,}000 required by the multi-start NLP baseline.
+
+\subsubsection{Hyperparameter Robustness}\label{subsec:robustness}
 
 % n_init sensitivity
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{figs/ninit_robustness.pdf}
-    \caption{Sensitivity to $n_\text{init}$. Final regret (log$_{10}$ scale) of bilevel BO is nearly flat across $n_\text{init} \in \{1, 5, 20, 50\}$, using the EI exploration parameter $\xi$ that yielded the lowest final regret for each problem. Even $n_\text{init}=1$ performs comparably to $n_\text{init}=50$.}
+    \caption{Sensitivity to $n_\text{init}$. Final regret (log$_{10}$ scale) of bilevel BO is nearly flat across $n_\text{init} \in \{1, 5, 20, 50\}$, using the best $\xi$ per problem. Even $n_\text{init}=1$ performs comparably to $n_\text{init}=50$, indicating that fewer expensive initial evaluations suffice.}
     \label{fig:ninit_robustness}
 \end{figure}
 
-The bilevel advantage is similarly robust to the EI exploration parameter $\xi$. No single $\xi$ is universally optimal---the best setting ranges from $\xi=0.001$ (CSTR, Distillation, Williams-Otto) to $\xi=0.5$ (Small-Feasible-Region-1, Membrane)---but bilevel BO significantly outperforms black-box BO at every $\xi$ tested, and adaptive $\xi$ strategies are not critical (Appendix Figure~\ref{fig:xi_heatmap}).
+Figure~\ref{fig:ninit_robustness} shows that bilevel BO performance is nearly flat across $n_\text{init} \in \{1, 5, 20, 50\}$ (numerical values in Appendix Table~\ref{tab:ninit_sensitivity}). Even $n_\text{init}=1$---a single initial sample---performs comparably to $n_\text{init}=50$, so fewer expensive initial evaluations suffice when $f^{\BB}$ is costly.
 
-\subsubsection{Computational Cost}\label{subsec:computational_cost}
-
-Both BO methods require $\sim$20--30s wall time for 200 iterations on 12 of 13 problems, as the lower-dimensional GP in bilevel BO roughly offsets the inner DE cost. The exception is Williams-Otto (111s vs.\ 26s), where the inner DE solves a 6-species steady-state mass balance at each iteration. Both BO methods use $\sim$205 black-box evaluations---an order of magnitude fewer than those required by the full-space DE baseline.
+Bilevel BO also dominates black-box BO across all values of the EI exploration parameter $\xi$ tested. No single $\xi$ is universally optimal---the best setting ranges from $\xi=0.001$ (CSTR, Distillation, Williams-Otto) to $\xi=0.5$ (Small-Feasible-Region-1, Membrane)---but adaptive $\xi$ strategies are not critical for the bilevel approach (Appendix Figure~\ref{fig:xi_heatmap}).
 
 %% ============================================================================
 %% SECTION 7: DISCUSSION
 %% ============================================================================
 \section{Discussion}\label{sec:discussion}
 
-Bilevel BO achieves 14$\times$--277{,}000$\times$ lower regret than black-box BO on every problem tested, with comparable computational cost. The source of this advantage is structural, not algorithmic: we use the same GP kernel, the same acquisition function, and the same optimizer as the black-box baseline. The gains come entirely from exploiting the separable problem structure---reducing the surrogate dimension and satisfying the white box constraints exactly. Three additional analyses---feasibility rates, a two-factor decomposition of the advantage, and sample efficiency crossover---provide mechanistic insight into when and why the bilevel decomposition helps.
+Bilevel BO achieves 14$\times$--277{,}000$\times$ lower regret than black-box BO on every problem tested, with comparable computational cost. The source of this advantage is structural, not algorithmic: we use the same GP kernel, the same acquisition function, and the same optimizer as the black-box baseline. The gains come entirely from exploiting the separable problem structure---reducing the surrogate dimension and satisfying constraints exactly. Three additional analyses---feasibility rates, a two-factor decomposition of the advantage, and sample efficiency crossover---provide mechanistic insight into when and why the bilevel decomposition helps.
 
 \noindent\textbf{Constraint satisfaction and wasted evaluations.}
-A key mechanism underlying the regret gap is that black-box BO wastes evaluations on infeasible queries. Figure~\ref{fig:feasibility_rates} reports the fraction of all 250 evaluations that land in feasible regions, reconstructed from stored search histories. Black-box BO wastes 6--72\% of its budget on infeasible points depending on the problem, with Small-Feasible-Region (72\%), Batch-Reactor (71\%), and Evaporator (58\%) being the worst cases. Bilevel BO achieves 100\% feasibility on 8 of 12 constrained problems because the inner DE solver handles constraint satisfaction exactly. On the remaining four problems (Batch-Reactor, Evaporator, Small-Feasible-Region, PSA), bilevel BO feasibility ranges from 59--91\%. This occurs for two reasons: (1)~the inner DE may return solutions where the total constraint violation $\max_i g_i(x^{\WB}, y)$ is positive but small (on the order of $10^{-4}$--$10^{-2}$), placing the solution near but outside the feasible boundary; or (2)~certain $y = f^{\BB}(x^{\BB})$ values yield an inner problem with no feasible solution, because no $x^{\WB} \in \mathcal{X}^{\WB}$ satisfies $g(x^{\WB}, y) \leq 0$. This is not a limitation of the bilevel architecture itself but of the inner solver; deterministic global solvers (e.g., BARON) would restore the 100\% guarantee.
+A key mechanism underlying the regret gap is that black-box BO wastes evaluations on infeasible queries. Figure~\ref{fig:feasibility_rates} reports the fraction of all 250 evaluations that land in feasible regions, reconstructed from stored search histories. Black-box BO wastes 6--72\% of its budget on infeasible points depending on the problem, with Small-Feasible-Region (72\%), Batch-Reactor (71\%), and Evaporator (58\%) being the worst cases. Bilevel BO achieves 100\% feasibility on 8 of 12 constrained problems because the inner NLP handles constraint satisfaction exactly. On the remaining four problems (Batch-Reactor, Evaporator, Small-Feasible-Region, PSA), bilevel BO feasibility ranges from 59--91\%, reflecting cases where the inner NLP converges to boundary solutions with slight numerical infeasibility or where some $y = f^{\BB}(x^{\BB})$ values render the inner problem infeasible entirely. This is not a limitation of the bilevel architecture itself but of the local NLP solver; deterministic global inner solvers would restore the 100\% guarantee.
 
 % Feasibility rate figure
 \begin{figure}[htbp]
@@ -623,7 +627,7 @@ A key mechanism underlying the regret gap is that black-box BO wastes evaluation
 \end{figure}
 
 \noindent\textbf{Disentangling dimensionality reduction from constraint satisfaction.}
-The regret ratios in Table~\ref{tab:final_regret} vary by four orders of magnitude across problems of the same total dimension. Figure~\ref{fig:dim_constraint_scatter} decomposes this variation by plotting total dimension against the feasible fraction of the domain (estimated by $10^5$ uniform random samples), with the regret ratio encoded as color. Two patterns emerge. First, dimensionality reduction is the dominant factor: Rastrigin (unconstrained, 100\% feasible domain) achieves a 57{,}717$\times$ improvement (at $n_\text{init}=50$, $\xi=0.2$; Table~\ref{tab:final_regret}) purely from reducing the GP surrogate from 3D to 1D. Second, constraint tightness modulates but does not determine the gain: Evaporator and Batch-Reactor have the \emph{tightest} constraints ($<$1.1\% feasible domain) yet the \emph{smallest} regret ratios (6$\times$ and 41$\times$), because their non-convex inner landscapes cause the inner DE to find local optima. Conversely, Heat-Exchanger has a loose constraint set (93\% feasible) but the largest gain (277{,}000$\times$), driven entirely by dimensionality reduction from 5D to 2D. The analysis confirms that when the inner optimizer is well-behaved, dimensionality reduction alone produces large gains; exact constraint satisfaction provides additional benefit but is neither necessary nor sufficient.
+The regret ratios in Table~\ref{tab:final_regret} vary by four orders of magnitude across problems of the same total dimension. Figure~\ref{fig:dim_constraint_scatter} decomposes this variation by plotting total dimension against the feasible fraction of the domain (estimated by $10^5$ uniform random samples), with the regret ratio encoded as color. Two patterns emerge. First, dimensionality reduction is the dominant factor: Rastrigin (unconstrained, 100\% feasible domain) achieves a 57{,}717$\times$ improvement (at $n_\text{init}=50$, $\xi=0.2$; Table~\ref{tab:final_regret}) purely from reducing the GP surrogate from 3D to 1D. Second, constraint tightness modulates but does not determine the gain: Evaporator and Batch-Reactor have the \emph{tightest} constraints ($<$1.1\% feasible domain) yet the \emph{smallest} regret ratios (6$\times$ and 41$\times$), because their non-convex inner landscapes cause the NLP to find local optima. Conversely, Heat-Exchanger has a loose constraint set (93\% feasible) but the largest gain (277{,}000$\times$), driven entirely by dimensionality reduction from 5D to 2D. The analysis confirms that when the inner NLP is well-behaved, dimensionality reduction alone produces large gains; exact constraint satisfaction provides additional benefit but is neither necessary nor sufficient.
 
 % Dimensionality vs. constraint scatter
 \begin{figure}[htbp]
@@ -634,7 +638,7 @@ The regret ratios in Table~\ref{tab:final_regret} vary by four orders of magnitu
 \end{figure}
 
 \noindent\textbf{Sample efficiency.}
-Beyond final regret, practitioners are interested in how quickly a method reaches useful solutions. Figure~\ref{fig:sample_crossover} reports the number of evaluations at which bilevel BO first matches the final regret that black-box BO achieves after all 250 evaluations. On 5 of 13 problems (Heat-Exchanger, Membrane, Williams-Otto, Distillation, CSTR), bilevel BO matches or surpasses black-box BO's final performance within the initial sampling phase alone---effectively from the first BO iteration. Even in the hardest case (Evaporator), crossover occurs at 47 evaluations (19\% of the total budget). This has direct practical implications: when each black-box evaluation costs hours of compute time, bilevel BO can deliver black-box BO-quality solutions using 80--100\% fewer expensive evaluations.
+Beyond final regret, practitioners care about how quickly bilevel BO reaches useful solutions. Figure~\ref{fig:sample_crossover} reports the number of evaluations at which bilevel BO first matches the final regret that black-box BO achieves after all 250 evaluations. On 5 of 13 problems (Heat-Exchanger, Membrane, Williams-Otto, Distillation, CSTR), bilevel BO matches or surpasses black-box BO's final performance within the initial sampling phase alone---effectively from the first BO iteration. Even in the hardest case (Evaporator), crossover occurs at 47 evaluations (19\% of the total budget). This has direct practical implications: when each black-box evaluation costs hours of compute time, bilevel BO can deliver black-box BO-quality solutions using 80--100\% fewer expensive evaluations.
 
 % Sample efficiency crossover
 \begin{figure}[htbp]
@@ -645,16 +649,16 @@ Beyond final regret, practitioners are interested in how quickly a method reache
 \end{figure}
 
 \noindent\textbf{Connection to decomposition in global optimization.}
-As discussed in Section~\ref{sec:related_work}, the bilevel reformulation belongs to a broader family of decomposition strategies---block coordinate descent~\cite{wright2015coordinate}, trust-region filter methods~\cite{eason2016trf,eason2018trf}, and data-driven bilevel solvers like DOMINO~\cite{beykal2020domino}. Our results provide empirical support for a principle from bilevel optimization theory~\cite{colson2007overview}: solving the inner problem exactly improves outer-level convergence. In the surrogate-based setting, the inner global optimizer eliminates noise from outer-level observations, giving the GP a cleaner signal. This suggests that bilevel decomposition may be beneficial whenever part of the optimization landscape admits an efficient exact solver, even beyond the grey-box problems studied here.
+As discussed in Section~\ref{sec:related_work}, the bilevel reformulation belongs to a broader family of decomposition strategies---block coordinate descent~\cite{wright2015coordinate}, trust-region filter methods~\cite{eason2016trf,eason2018trf}, and data-driven bilevel solvers like DOMINO~\cite{beykal2020domino}. Our results provide empirical support for a principle from bilevel optimization theory~\cite{colson2007overview}: solving the inner problem exactly improves outer-level convergence. In the surrogate-based setting, the inner NLP eliminates noise from outer-level observations, giving the GP a cleaner signal. This suggests that bilevel decomposition may be beneficial whenever part of the optimization landscape admits an efficient exact solver, even beyond the grey-box problems studied here.
 
 \noindent\textbf{Complementarity with existing grey-box BO.}
-As detailed in Section~\ref{sec:related_work}, COBALT~\cite{paulson2022cobalt} and BOCF~\cite{astudillo2019bocf} address settings our method does not: non-separable composite functions and risk-averse decisions via uncertainty propagation. Our method trades their generality for simplicity and exactness when Assumption~\ref{ass:separability} holds. A direct comparison on the same benchmark suite is planned for future work.
+As detailed in Section~\ref{sec:related_work}, COBALT~\cite{paulson2022cobalt} and BOCF~\cite{astudillo2019bocf} address settings our method does not: non-separable composite functions and risk-averse decisions via uncertainty propagation. Our method trades their generality for simplicity and exactness when Assumption~\ref{ass:separability} holds. A head-to-head comparison on the same benchmark suite is planned for future work.
 
 \noindent\textbf{Baseline constraint handling.}
-The black-box BO baseline uses a fixed penalty ($10^6$) for constraint violations. More sophisticated constrained BO methods---feasibility-weighted expected improvement~\cite{gardner2014}, augmented Lagrangian approaches~\cite{gramacy2016}---would likely narrow the gap on tightly constrained problems such as Heat-Exchanger and Distillation, where the penalty method is least effective. However, the dimensionality reduction advantage of bilevel BO would persist regardless of constraint handling, as the surrogate dimension reduction from $n_{\WB}+n_{\BB}$ to $n_{\BB}$ is independent of the acquisition function. We intentionally use vanilla methods for both BO and NLP to isolate the effect of the bilevel structure rather than specific algorithmic choices.
+The black-box BO baseline uses a fixed penalty ($10^6$) for constraint violations. More sophisticated constrained BO methods---feasibility-weighted expected improvement~\cite{gardner2014}, augmented Lagrangian approaches~\cite{gramacy2016}---would likely narrow the gap on tightly constrained problems such as Heat-Exchanger and Distillation, where the penalty method fails hardest. However, the dimensionality reduction advantage of bilevel BO would persist regardless of constraint handling, as the surrogate dimension reduction from $n_{\WB}+n_{\BB}$ to $n_{\BB}$ is independent of the acquisition function. We intentionally use vanilla methods for both BO and NLP to isolate the effect of the bilevel structure rather than specific algorithmic choices.
 
 \noindent\textbf{Limitations and open problems.}
-We identify five limitations, each pointing to an open problem. (1)~The inner optimizer must converge to the global optimum (Assumption~\ref{ass:separability}(ii)). For non-convex inner problems, DE may converge to local optima---as observed in Section~\ref{sec:results}, this explains both the modest 14$\times$ improvement on Rosen-Suzuki and the sub-100\% feasibility on Batch-Reactor and Evaporator (Figure~\ref{fig:feasibility_rates}). Replacing DE with a deterministic global solver (e.g., BARON) would provide optimality certificates for the inner problem but at higher computational cost. (2)~Expensive inner optimizations can dominate wall time, as Williams-Otto demonstrates (111s vs.\ 26s). Warm-starting the inner solver from previous solutions or using reduced-order inner models could mitigate this. (3)~Pure black-box constraints---those depending directly on $f^{\BB}$ outputs without passing through the white-box model---are not handled; extending the outer loop with constrained BO methods~\cite{gardner2014,gelbart2014unknown} would address this. (4)~All black-box functions in our suite are closed-form surrogates of what would be expensive computations; validation on a real DFT or molecular dynamics black box would strengthen the practical case. (5)~Formal convergence guarantees for the outer BO loop---which follow from standard results since it is BO over a compact domain with a GP surrogate---are not analyzed here; characterizing how the bilevel structure affects dimension-dependent regret bounds is future work.
+We identify six limitations, each pointing to an open problem. (1)~The method requires knowing the separable structure a priori; automatic detection of which variables are black-box versus white-box---perhaps via sensitivity analysis or computational graph inspection---would broaden applicability. (2)~The inner NLP must converge to the global optimum (Assumption~\ref{ass:separability}(ii)). For non-convex inner problems, multi-start solvers may find only local optima---this likely explains the modest 14$\times$ improvement on Rosen-Suzuki and the sub-100\% feasibility on Batch-Reactor and Evaporator (Figure~\ref{fig:feasibility_rates}). Rigorous handling via deterministic global solvers (e.g., BARON) is future work. (3)~Expensive inner NLPs can dominate wall time, as Williams-Otto demonstrates (111s vs.\ 26s). Warm-starting the inner NLP from previous solutions or using reduced-order inner models could mitigate this. (4)~Pure black-box constraints---those depending directly on $f^{\BB}$ outputs without passing through the white-box model---are not handled; extending the outer loop with constrained BO methods~\cite{gardner2014,gelbart2014unknown} would address this. (5)~All black-box functions in our suite are closed-form surrogates of what would be expensive computations; validation on a real DFT or molecular dynamics black box would strengthen the practical case. (6)~Formal convergence guarantees for the outer BO loop---which follow from standard results since it is BO over a compact domain with a GP surrogate---are not analyzed here; characterizing how the bilevel structure affects dimension-dependent regret bounds is future work.
 
 \noindent\textbf{Broader implications.}
 Expensive black-box optimization problems frequently contain exploitable structure---known physics, analytical submodels, or differentiable components---that monolithic surrogates ignore. The bilevel decomposition is one instance of a general principle: \emph{solve what you can solve exactly, and surrogate only what you must}. As surrogate-based methods scale to higher-dimensional search spaces, structural decomposition becomes not merely helpful but necessary to overcome the curse of dimensionality. The 13-problem benchmark suite provides a testbed for developing and comparing methods that exploit this structure.
@@ -708,7 +712,7 @@ Gardner et al.~\cite{gardner2014} and Ariafar et al.~\cite{Ariafar2019} propose 
     &~~ 0 \leq x_i \leq 6, ~~~~ \forall i \in \{1, 2\}
 \end{align}
 
-The global minimum is $J^\star = 0.2532$ and is located at $x^{\WB\star}_1=\frac{3\pi}{2}$, $x^{\BB\star}=x_2=1.2532$.
+The global minimum is $J^\star = 0.253236$ and is located at $x_1=\frac{3\pi}{2}$, $x^{\BB}=x_2=0.253236$.
 
 \subsection{Modified Small Feasible Region Problem 2}\label{subsec:app_sfr2}
 
@@ -744,7 +748,7 @@ We use a modified formulation of the Toy Hydrology problem~\cite{gramacy2016} th
     &~~ 0 \leq x_i \leq 1, ~~~~~ \forall i \in \{ 1, 2 \}, \\\notag
     &~~ x = [x^{\WB}, x^{\BB}], ~~~~~ x^{\BB} = [x_1], ~~~~~ x^{\WB} = [x_2].
 \end{align}
-The global minimum is $0.5998$ with $x^{\WB\star} = 0.4047, x^{\BB\star} = 0.1951$.
+The global minimum is $0.5998$ with $x^{\WB\star} = 0.1951, x^{\BB\star} = 0.4047$.
 
 \subsection{Rosen-Suzuki}\label{subsec:app_rosen_suzuki}
 
@@ -762,7 +766,7 @@ We use a modified formulation of the Rosen-Suzuki function~\cite{rosenbrock1960}
 The global minimum is $-44$ with $x^{\WB\star} = [0, 1]^\top, x^{\BB\star} = [2, -1]^\top$.
 
 \subsection{Catalytic Reactor Design}\label{subsec:app_cstr}
-We use a catalytic reactor design problem that combines a white-box CSTR process model with black-box catalyst properties akin to those derived from DFT calculations. The objective is to \emph{maximize} the yield of intermediate product $B$ in consecutive reactions $A \to B \to C$. The problem can be formulated as a multi-scale grey-box problem as follows:
+We use a catalytic reactor design problem that combines a white-box CSTR process model with black-box catalyst properties derived from DFT calculations. The objective is to \emph{maximize} the yield of intermediate product $B$ in consecutive reactions $A \to B \to C$. The problem can be formulated as a multi-scale grey-box problem as follows:
 \begin{align} \label{eq:CSTR}
     \max_{T, P, \tau, E_b, \Delta E_a} &~~ Y_B \\\notag
     \text{s.t.} &~~ \bff^\WB=\left[
@@ -788,11 +792,7 @@ and the conversion and byproduct yield are:
 \end{align}
 
 The black-box function $f^{\BB}$ maps catalyst properties $\Delta E_a$, $E_b$ to kinetic parameters via a volcano-type activity model:
-
-
-
 \begin{table}[htbp]
-    \caption{Parameters for the catalytic reactor design problem.\label{tab:cstr_parameters}}
 \begin{tabular}{llll}
     \toprule
     \bf{Symbol} & \bf{Description} & \bf{Range / Value} & \bf{Units} \\
@@ -823,7 +823,7 @@ The black-box function $f^{\BB}$ maps catalyst properties $\Delta E_a$, $E_b$ to
     \bottomrule
 \end{tabular}
 \end{table}
-The global maximum yield given the parameters in Table~\ref{tab:cstr_parameters} is $92.32\%$ with $x^{\WB\star} = [647.3, 20.0, 5.0]^\top$, $x^{\BB\star} = [-1.047, 0.200]^\top$.
+The global maximum yield is $92.32\%$ with $x^{\WB\star} = [647.25, 20.00, 5.00]^\top$, $x^{\BB\star} = [-1.047, 0.20]^\top$.
 
 \subsection{Heat Exchanger with Novel Working Fluid}\label{subsec:app_heat_exchanger}
 
@@ -867,7 +867,7 @@ $y_3$ & Thermal conductivity ($k$) & N/A & N/A & W/m$\cdot$K \\
 \end{tabular}
 \end{table}
 
-where $y_1$ is the heat capacity [kJ/kg$\cdot$K], $y_2$ is the viscosity [Pa$\cdot$s], and $y_3$ is the thermal conductivity [W/m$\cdot$K]. The constraint $g_1$ ensures the heat duty $Q = U \cdot A \cdot \Delta T_{lm} \geq 100$ kW is satisfied, and $g_2$ enforces turbulent flow with Reynolds number $\text{Re} \geq 4000$. The global minimum cost given the parameters in Table~\ref{tab:heat_exchanger_vars} is $1000.0$ with $x^{\WB\star} = [1.0, 0.1, 19.3]^\top$, $x^{\BB\star} = [50.0, 0.0]^\top$.
+where $y_1$ is the heat capacity [kJ/kg$\cdot$K], $y_2$ is the viscosity [Pa$\cdot$s], and $y_3$ is the thermal conductivity [W/m$\cdot$K]. The constraint $g_1$ ensures the heat duty $Q = U \cdot A \cdot \Delta T_{lm} \geq 100$ kW is satisfied, and $g_2$ enforces turbulent flow with Reynolds number $\text{Re} \geq 4000$. The global minimum cost is $1000.0$ with $x^{\WB\star} = [1.0, 0.1, 39.59]^\top$, $x^{\BB\star} = [50.0, 0.0]^\top$.
 
 \subsection{Pressure Swing Adsorption with Novel Adsorbent}\label{subsec:app_psa}
 
@@ -920,7 +920,7 @@ $y_3 = K_B$ & Adsorption equilibrium constant (component B) & --- & 1/bar \\
 \end{tabular}
 \end{table}
 
-The constraint $g_1$ ensures minimum selectivity $\alpha \geq 3$ for effective separation~\cite{hasan2013cost,yang1987gas}, and $g_2$ enforces minimum product purity based on the Langmuir isotherm equilibrium~\cite{langmuir1918adsorption,ruthven1994psa}. The global minimum given the parameters in Table~\ref{tab:psa_vars} is $-0.6433$ with $x^{\WB\star} = [3.97, 0.1, 10.0]^\top$, $x^{\BB\star} = [6.04, 19.55]^\top$.
+The constraint $g_1$ ensures minimum selectivity $\alpha \geq 3$ for effective separation~\cite{hasan2013cost,yang1987gas}, and $g_2$ enforces minimum product purity based on the Langmuir isotherm equilibrium~\cite{langmuir1918adsorption,ruthven1994psa}. The global minimum is $-0.6433$ with $x^{\WB\star} = [3.97, 0.1, 10.0]^\top$, $x^{\BB\star} = [6.04, 19.55]^\top$.
 
 \subsection{Batch Reactor with Catalyst Optimization}\label{subsec:app_batch_reactor}
 
@@ -976,7 +976,7 @@ $y_3 = K_{\text{eq}}$ & Adsorption equilibrium constant & --- & --- \\
 \end{tabular}
 \end{table}
 
-The constraint $g_1$ ensures minimum conversion $X_A \geq 0.8$, and $g_2$ enforces selectivity $S_B = C_B/(C_{A,0} - C_A) \geq 0.7$, requiring that at least 70\% of converted reactant forms the desired intermediate. The global minimum given the parameters in Table~\ref{tab:batch_reactor_vars} is $-1.7488$ with $x^{\WB\star} = [500.0, 4.394, 5.0]^\top$, $x^{\BB\star} = [-1.01, 2.0]^\top$.
+The constraint $g_1$ ensures minimum conversion $X_A \geq 0.8$, and $g_2$ enforces selectivity $S_B = C_B/(C_{A,0} - C_A) \geq 0.7$, requiring that at least 70\% of converted reactant forms the desired intermediate. The global minimum is $-1.7485$ with $x^{\WB\star} = [500.0, 4.394, 5.0]^\top$, $x^{\BB\star} = [-1.0, 2.0]^\top$.
 
 \subsection{Extractive Distillation with Novel Solvent}\label{subsec:app_distillation}
 
@@ -1035,15 +1035,15 @@ $x_B$ & Bottoms impurity specification & 0.01 & mol/mol \\
 \end{tabular}
 \end{table}
 
-The constraint $g_1$ ensures the reflux ratio exceeds the minimum by at least 20\% for operational flexibility, $g_2$ requires sufficient stages above the Fenske minimum, and $g_3$ limits solvent inventory based on density to control capital costs. The global minimum cost for the parameters in Table~\ref{tab:distillation_vars} is $11{,}758$ with $x^{\WB\star} = [1.0, 11.0, 0.5]^\top$, $x^{\BB\star} = [19.8, 9.99]^\top$.
+The constraint $g_1$ ensures the reflux ratio exceeds the minimum by at least 20\% for operational flexibility, $g_2$ requires sufficient stages above the Fenske minimum, and $g_3$ limits solvent inventory based on density to control capital costs. The global minimum cost is $11759.0$ with $x^{\WB\star} = [1.0, 11.0, 0.5]^\top$, $x^{\BB\star} = [20.0, 10.0]^\top$.
 
 \subsection{Multi-Effect Evaporator with Phase-Change Material}\label{subsec:app_evaporator}
 
-We consider a prototype test problem for the design of a multi-effect evaporator (MEE) system integrated with a novel phase-change material (PCM) as the heat transfer medium. Multi-effect evaporator synthesis follows established energy balance formulations~\cite{hillenbrand1988synthesis}, where steam economy improves with additional effects but with diminishing returns due to tighter temperature driving forces. The efficiency degradation across effects is captured by the factor $0.9^{n-1}$, consistent with typical industrial values of 0.7--0.9 pounds of evaporation per pound of steam per effect~\cite{swenson2024mee}.
+We consider a stylized test problem for the design of a multi-effect evaporator (MEE) system integrated with a novel phase-change material (PCM) as the heat transfer medium. Multi-effect evaporator synthesis follows established energy balance formulations~\cite{hillenbrand1988synthesis}, where steam economy improves with additional effects but with diminishing returns due to cascading temperature driving forces. The efficiency degradation across effects is captured by the factor $0.9^{n-1}$, consistent with typical industrial values of 0.7--0.9 pounds of evaporation per pound of steam per effect~\cite{swenson2024mee}.
 
 The white-box model includes energy balances relating the heat transfer fluid (HTF) flow rate and properties to evaporation capacity~\cite{ahmetovic2018simultaneous}. The latent heat of vaporization for water (2260 kJ/kg) determines the evaporation rate from available thermal energy. The number of effects $n$, HTF mass flow rate $\dot{m}_{\text{HTF}}$, and temperature drop per effect $\Delta T_{\text{effect}}$ are the white-box decision variables.
 
-The black-box model represents molecular simulation or group-contribution predictions of PCM thermophysical properties~\cite{sharma2009review,zalba2003review} as functions of melting temperature $T_m$ and a molecular structure parameter $\lambda$ that controls the length of alkyl chains (affecting both latent heat and heat capacity). The key outputs are latent heat of fusion $\Delta H_{\text{fus}}$ (typical range 150--300 kJ/kg for organic PCMs), liquid heat capacity $c_p^{\text{liq}}$ (typically 2--3 kJ/(kg$\cdot$K)), and the actual melting temperature $T_{\text{melt}}$. The functional forms in $f^\BB$ are intended to capture qualitative structure-property relationships rather than precise physical models.
+The black-box model represents molecular simulation or group-contribution predictions of PCM thermophysical properties~\cite{sharma2009review,zalba2003review} as functions of melting temperature $T_m$ and a molecular structure parameter $\lambda$ that controls the length of alkyl chains (affecting both latent heat and heat capacity). The key outputs are latent heat of fusion $\Delta H_{\text{fus}}$ (typical range 150--300 kJ/kg for organic PCMs), liquid heat capacity $c_p^{\text{liq}}$ (typically 2--3 kJ/(kg$\cdot$K)), and the actual melting temperature $T_{\text{melt}}$. The functional forms in $f^\BB$ are stylized representations that capture qualitative structure-property relationships rather than precise physical models.
 
 The problem can be formulated as:
 \begin{align} \label{eq:Evaporator}
@@ -1093,7 +1093,7 @@ $\eta_{\text{effect}}$ & Per-effect efficiency factor & 0.9 & --- \\
 \end{tabular}
 \end{table}
 
-The constraint $g_1$ ensures temperature feasibility: the PCM melting temperature must exceed the cumulative temperature drop across all effects plus a 100$^\circ$C baseline. The constraint $g_2$ enforces a minimum evaporation rate of 5 kg/s to meet production requirements. The global minimum for parameters in Table~\ref{tab:evaporator_vars} is $-1.9587$ with $x^{\WB\star} = [4.09, 19.07, 5.0]^\top$, $x^{\BB\star} = [120.47, 2.0]^\top$.
+The constraint $g_1$ ensures temperature feasibility: the PCM melting temperature must exceed the cumulative temperature drop across all effects plus a 100$^\circ$C baseline. The constraint $g_2$ enforces a minimum evaporation rate of 5 kg/s to meet production requirements. The global minimum is $-1.9587$ with $x^{\WB\star} = [4.09, 19.07, 5.0]^\top$, $x^{\BB\star} = [120.47, 2.0]^\top$.
 
 \subsection{Membrane Separation with Designed Polymer}\label{subsec:app_membrane}
 
@@ -1101,7 +1101,7 @@ We consider the integrated design of a membrane gas separation process and the p
 
 The white-box model follows the solution-diffusion transport mechanism~\cite{wijmans1995solution}, where the permeate flux $J_A$ is proportional to permeability, pressure driving force, and inversely proportional to membrane thickness $\delta$. The membrane area $A_m$, thickness $\delta$, and transmembrane pressure difference $\Delta p$ are the white-box decision variables, with the objective of maximizing product recovery while minimizing capital (area) and operating (compression) costs.
 
-The black-box model represents structure-property relationships from molecular simulations or machine learning predictions~\cite{barnett2020designing} that map polymer descriptors---fractional free volume (FFV) and chain spacing $d_{\text{spacing}}$---to transport properties. The Robeson trade-off is encoded in the black-box functions: increasing FFV enhances permeability but reduces selectivity, while chain spacing affects both the upper bound position and mechanical integrity. The mechanical strength constraint reflects the requirement that the membrane must withstand the transmembrane pressure difference during module operation~\cite{park2017maximizing}.
+The black-box model represents structure-property relationships from molecular simulations or machine learning predictions~\cite{barnett2020designing} that map polymer descriptors---fractional free volume (FFV) and chain spacing $d_{\text{spacing}}$---to transport properties. The Robeson trade-off is encoded in the black-box functions: increasing FFV enhances permeability but reduces selectivity, while chain spacing affects both the upper bound position and mechanical integrity. Process superstructure considerations~\cite{chiwaye2025superstructure,demirel2022membrane} motivate the mechanical strength constraint.
 
 The problem can be formulated as:
 \begin{align} \label{eq:Membrane}
@@ -1117,8 +1117,6 @@ The problem can be formulated as:
     &~~ \text{FFV} \in [0.1, 0.3], \quad d_{\text{spacing}} \in [3, 8], \\\notag
     &~~ x = [x^{\WB}, x^{\BB}], \quad x^{\WB} = [A_m, \delta, \Delta p], \quad x^{\BB} = [\text{FFV}, d_{\text{spacing}}],
 \end{align}
-Refer to the parameter definitions in Table~\ref{tab:membrane_vars}.
-
 \begin{table}[htbp]
 \centering
 \caption{Variables, physical meaning, bounds, and units (Membrane Separation)}
@@ -1157,7 +1155,7 @@ The mechanical strength proxy $y_3$ captures the physical principle that increas
 
 The constraint $g_1$ ensures minimum flux $J_A \geq 10^{-6}$ mol/(m$^2\cdot$s) for practical separation rates, and $g_2$ enforces mechanical stability by limiting the pressure-area product relative to membrane strength.
 
-The global optimum for parameters in Table~\ref{tab:membrane_vars} occurs at $x^{\WB*} = [A_m, \delta, \Delta p] = [10, 0.1, 1]$ and $x^{\BB*} = [\text{FFV}, d_{\text{spacing}}] = [0.3, 5.13]$, yielding $J^* = 10.997$. The optimizer drives all white-box variables to their lower bounds---minimizing membrane area (capital cost) and pressure difference (operating cost) while maximizing flux through minimum thickness---and selects maximum FFV for permeability while tuning chain spacing to optimize the selectivity-permeability trade-off near the Gaussian peak at $d_{\text{spacing}} \approx 5$~\AA.
+The global optimum, verified via multi-start NLP with 1000 starting points, occurs at $x^{\WB*} = [A_m, \delta, \Delta p] = [10, 0.1, 1]$ and $x^{\BB*} = [\text{FFV}, d_{\text{spacing}}] = [0.3, 5.13]$, yielding $J^* = 10.997$. The optimizer drives all white-box variables to their lower bounds---minimizing membrane area (capital cost) and pressure difference (operating cost) while maximizing flux through minimum thickness---and selects maximum FFV for permeability while tuning chain spacing to optimize the selectivity-permeability trade-off near the Gaussian peak at $d_{\text{spacing}} \approx 5$~\AA.
 
 \subsection{Williams-Otto Process}\label{subsec:app_williams_otto}
 
@@ -1187,7 +1185,7 @@ where P is the desired product and G is waste. We formulate this as a multi-scal
     &~~ \varepsilon \in [5, 25]~\text{kJ/mol}, \quad \sigma_c \in [3, 10]~\text{\AA}, \\\notag
     &~~ x = [x^{\WB}, x^{\BB}], \quad x^{\WB} = [T, F_{fB}, \mu], \quad x^{\BB} = [\varepsilon, \sigma_c],
 \end{align}
-where $X_i = m_i/m$ are mass fractions and $m$ is total reactor mass. Refer to the parameters in Table~\ref{tab:williams_otto_vars}.
+where $X_i = m_i/m$ are mass fractions and $m$ is total reactor mass.
 
 \begin{table}[htbp]
 \centering
@@ -1227,7 +1225,7 @@ $F_{fA}$ & Feed flow rate of A (fixed) & 10 & klb/h \\
 \end{tabular}
 \end{table}
 
-The black-box outputs $y_1$ and $y_2$ represent catalyst activity factors for reactions 1 and 2, modeled as volcano-type functions of catalyst surface energy $\varepsilon$ and pore size $\sigma_c$. The constraint $g_1$ limits waste production ($F_{wG} \leq 1.0$ klb/h) and $g_2$ ensures mass balance closure ($\sum_i X_i \geq 0.5$). The global maximum net product flow is $5.470$ klb/h with $x^{\WB\star} = [581.9, 50.0, 50.0]^\top$, $x^{\BB\star} = [12.6, 6.11]^\top$.
+The black-box outputs $y_1$ and $y_2$ represent catalyst activity factors for reactions 1 and 2, modeled as volcano-type functions of catalyst surface energy $\varepsilon$ and pore size $\sigma_c$. The constraint $g_1$ limits waste production ($F_{wG} \leq 1.0$ klb/h) and $g_2$ ensures mass balance closure ($\sum_i X_i \geq 0.5$). The global maximum net product flow is $5.460$ klb/h with $x^{\WB\star} = [581.6, 50.0, 50.0]^\top$, $x^{\BB\star} = [12.61, 6.11]^\top$.
 
 %% ============================================================================
 %% APPENDIX B: ACQUISITION FUNCTIONS
@@ -1268,7 +1266,7 @@ The modified Watson-Barnes 2 (mWB2) acquisition function was proposed in the COB
 \begin{equation}\label{eq:mwb2}
     \alpha_\text{mWB2}(x) = s_n \cdot \alpha_\text{EI}(x) - \mu(x), \quad s_n = -3\left(1 - \frac{n}{N}\right),
 \end{equation}
-where $n$ is the current iteration and $N$ is the total budget. The dynamic scaling factor $s_n$ starts large (emphasizing EI-driven exploration) and decreases toward zero (shifting weight to the GP mean for exploitation). For maximization, the sign of $\mu(x)$ is reversed.
+where $n$ is the current iteration and $N$ is the total budget. The dynamic scaling factor $s_n$ starts large (emphasizing EI-driven exploration) and decreases toward zero (shifting weight to the GP mean for exploitation). For maximization, the sign of $\mu(x)$ is flipped.
 
 \subsection{Thompson Sampling}\label{subsec:app_thompson}
 
@@ -1316,21 +1314,25 @@ Optimizer restarts & 5 & L-BFGS-B on log marginal likelihood \\
 The bilevel BO surrogate fits a GP over $n_{\BB} = 1$--2 input dimensions, while the black-box BO surrogate fits over $n_{\WB}+n_{\BB} = 2$--5 dimensions. Since GP fitting scales as $O(N^3)$ in the number of observations $N$ (which is the same for both methods) and the per-prediction cost is $O(N^2 D)$, the lower dimensionality of bilevel BO reduces prediction cost but does not change the dominant $O(N^3)$ training cost. In practice, with $N \leq 250$ and $D \leq 5$, GP fitting is fast for both methods (typically $<$0.1 seconds per iteration).
 
 %% ============================================================================
-%% APPENDIX D: DE BASELINE DETAILS
+%% APPENDIX D: NLP BASELINE DETAILS
 %% ============================================================================
-\section{DE Baseline Details}\label{sec:nlp_details}
+\section{NLP Baseline Details}\label{sec:nlp_details}
 
-The black-box DE baseline solves the full problem~\eqref{eq:full_problem} directly using SciPy's \texttt{differential\_evolution} over the full variable space $[x^{\WB}, x^{\BB}]$ with a population size multiplier of 15, a maximum of 1{,}000 generations, and L-BFGS-B polishing of the best solution.
+The black-box NLP baseline solves the full problem~\eqref{eq:full_problem} directly using \texttt{scipy.optimize.minimize} with the SLSQP method. Because SLSQP is a local solver and the problems are generally non-convex, we use a multi-start strategy with 20 random restarts drawn from a Latin hypercube over the full variable bounds $\mathcal{X}^{\WB} \times \mathcal{X}^{\BB}$.
 
-\subsection{Constraint Handling}\label{subsec:de_constraints}
+\subsection{Gradient Computation}\label{subsec:nlp_gradients}
 
-Constraints are handled via SciPy's \texttt{NonlinearConstraint} interface, enforcing $g(x^{\WB}, y, x^{\BB}) \leq 0$. After optimization, feasibility is verified: solutions satisfying all constraints to within $10^{-6}$ are considered feasible. If no feasible solution is found, the solver returns the solution with minimum constraint violation.
+SLSQP requires gradient information. For the white-box variables $x^{\WB}$, the objective $J$ and constraints $g$ are differentiable and \texttt{scipy} computes gradients via finite differences. For the black-box variables $x^{\BB}$, the gradients of the composite function $J(x^{\WB}, f^{\BB}(x^{\BB}))$ with respect to $x^{\BB}$ also require finite differences through $f^{\BB}$. Each gradient evaluation thus requires $O(n_{\BB})$ additional calls to $f^{\BB}$. Over 20 multi-start runs, the total number of $f^{\BB}$ evaluations is typically 900--3{,}000, depending on the problem and the number of iterations each SLSQP run takes to converge.
 
-In contrast, both BO methods track feasibility explicitly. For black-box BO, constraints are handled via a penalty of $10^6$ added to the objective when any $g_i(x) > 0$. For bilevel BO, the inner DE solver checks constraint satisfaction and returns a penalty value when the inner problem is infeasible for a given $y$.
+\subsection{Constraint Handling}\label{subsec:nlp_constraints}
 
-\subsection{Sample Efficiency Comparison}\label{subsec:de_sample_efficiency}
+SLSQP handles inequality constraints natively through its sequential quadratic programming formulation. However, convergence to feasible points is not guaranteed for non-convex constraint sets. We observed that on several constrained problems, some multi-start runs converge to constraint-violating local optima. The NLP baseline reports the best objective across all 20 starts without checking feasibility, which means its reported regret may be optimistic when the best NLP solution is slightly infeasible.
 
-Table~\ref{tab:sample_efficiency} compares the number of black-box evaluations across solvers. The DE baseline evaluates $f^{\BB}$ at every candidate in the population at every generation, resulting in substantially more $f^{\BB}$ evaluations than either BO method.
+In contrast, both BO methods track feasibility explicitly. For black-box BO, constraints are handled via a penalty of $10^6$ added to the objective when any $g_i(x) > 0$. For bilevel BO, the inner NLP solver checks constraint satisfaction and returns a penalty value when the inner problem is infeasible for a given $y$.
+
+\subsection{Sample Efficiency Comparison}\label{subsec:nlp_sample_efficiency}
+
+Table~\ref{tab:sample_efficiency} compares the number of black-box evaluations across solvers. The NLP baseline uses an order of magnitude more $f^{\BB}$ evaluations than either BO method, making it impractical when each evaluation is truly expensive (e.g., DFT calculations taking hours).
 
 \begin{table}[htbp]
 \centering
@@ -1340,18 +1342,18 @@ Table~\ref{tab:sample_efficiency} compares the number of black-box evaluations a
 \toprule
 \textbf{Solver} & \textbf{$f^{\BB}$ evaluations} & \textbf{Notes} \\
 \midrule
-Black-box DE & population-dependent & $15 \times n_\text{dim}$ per generation \\
+Black-box NLP & 900--3{,}000 & 20 restarts $\times$ finite-diff.\ gradients \\
 Black-box BO & $n_\text{init} + 200$ & One $f^{\BB}$ per iteration \\
 Bilevel BO & $n_\text{init} + 200$ & One $f^{\BB}$ per iteration \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Both BO methods call $f^{\BB}$ exactly once per iteration, so the total sample budget is $n_\text{init} + N$ where $N=200$ is the number of BO iterations. With $n_\text{init} = 5$ (the default), this gives 205 evaluations. Bilevel BO additionally solves an inner DE at each iteration, but this uses only the white-box model $f^{\WB}$ (which is cheap) and does not require additional calls to $f^{\BB}$.
+Both BO methods call $f^{\BB}$ exactly once per iteration, so the total sample budget is $n_\text{init} + N$ where $N=200$ is the number of BO iterations. With $n_\text{init} = 5$ (the default), this gives 205 evaluations. Bilevel BO additionally solves an inner NLP at each iteration, but this uses only the white-box model $f^{\WB}$ (which is cheap) and does not require additional calls to $f^{\BB}$.
 
-\subsection{Failure Modes}\label{subsec:de_failures}
+\subsection{Failure Modes}\label{subsec:nlp_failures}
 
-The DE baseline fails on two problems. On Rastrigin, multimodality in the full combined space challenges even global solvers: the DE baseline achieves a final regret of 3.38, worse than both BO methods. On Small-Feasible-Region-2, the narrow feasible region limits convergence: the DE baseline reports a regret of 0.055, while bilevel BO achieves effectively zero regret.
+The NLP baseline fails in two distinct ways. First, on multimodal problems (Rastrigin), gradient-based optimization converges to local minima. The 20 multi-start restarts mitigate this but do not eliminate it: the NLP achieves a final regret of 3.38 on Rastrigin, worse than both BO methods. Second, on problems with narrow feasible regions or nonlinear black-box coupling (Small-Feasible-Region-2), finite-difference gradients through $f^{\BB}$ are inaccurate near constraint boundaries. The NLP reports a regret of 0.055 on this problem, while bilevel BO achieves effectively zero regret.
 
 %% ============================================================================
 %% APPENDIX E: GLOBAL OPTIMUM VERIFICATION
@@ -1362,9 +1364,13 @@ Each problem's global optimum $J^\star$ was verified through a multi-stage proce
 
 \subsection{Verification Procedure}\label{subsec:verification_procedure}
 
-We used two complementary approaches, each repeated across 10 independent random seeds. First, we ran differential evolution (DE) over the full variable space $[x^{\WB}, x^{\BB}]$ with a population size of 30, a maximum of 2{,}000 generations, tight convergence tolerances ($\text{tol} = \text{atol} = 10^{-12}$), and SLSQP polishing of the best solution. Constraints were handled via \texttt{NonlinearConstraint}. Second, we ran multi-start SLSQP with 500 Latin hypercube starting points per seed.
+We used three complementary approaches. First, we ran differential evolution (DE) over the full variable space $[x^{\WB}, x^{\BB}]$ with a population of 100 and 1{,}000 generations. Second, we ran bilevel DE---differential evolution over $x^{\BB}$ with the inner NLP solved exactly for each candidate---to exploit the separable structure during verification. Third, we ran multi-start NLP with 1{,}000 random restarts.
 
-For each problem, we compared the best feasible solutions across all 20 runs (10 DE + 10 multi-start NLP). All 13 problems achieved agreement to within $2 \times 10^{-4}$ relative error, confirming the reported optima. For constrained problems, we verified that the optimal solution satisfies all inequality constraints $g_i(x^{\WB\star}, y^\star) \leq 0$ to within a tolerance of $10^{-6}$.
+For each problem, we compared the best solutions from all three approaches. When all three methods agreed to within $10^{-4}$, we accepted the optimum. When they disagreed, we investigated manually by examining the objective landscape and constraint activity at the candidate optima.
+
+\subsection{Feasibility Checks}\label{subsec:feasibility_checks}
+
+For constrained problems, we verified that the reported optimal solution satisfies all inequality constraints $g_i(x^{\WB\star}, y^\star) \leq 0$ to within a tolerance of $10^{-6}$. We also checked that no nearby feasible point achieves a better objective, by perturbing the optimal solution along the active constraint boundaries and confirming that the objective worsens.
 
 \subsection{Verified Optima}\label{subsec:verified_optima}
 
@@ -1372,26 +1378,26 @@ Table~\ref{tab:verified_optima} reports the verified global optimum for each pro
 
 \begin{table}[htbp]
 \centering
-\caption{Verified global optima for all 13 benchmark problems. Optima verified via differential evolution (popsize = 30, maxiter = 2000, 10 seeds) and multi-start SLSQP (500 Latin hypercube starts, 10 seeds).}
+\caption{Verified global optima for all 13 benchmark problems.}
 \label{tab:verified_optima}
 \begin{tabular}{@{}lrll@{}}
 \toprule
 \textbf{Problem} & $J^\star$ & $x^{\WB\star}$ & $x^{\BB\star}$ \\
 \midrule
-Small-Feasible-Region 1 & 0.2532 & $[4.712]$ & $[1.253]$ \\
+Small-Feasible-Region 1 & 0.2532 & $[4.712]$ & $[0.253]$ \\
 Small-Feasible-Region 2 & $-2.000$ & $[4.712]$ & $[5.500]$ \\
 Rastrigin & 0.0000 & $[0, 0]$ & $[0]$ \\
 Toy-Hydrology & 0.5998 & $[0.405]$ & $[0.195]$ \\
 Rosen-Suzuki & $-44.00$ & $[0, 1]$ & $[2, -1]$ \\
 \midrule
-CSTR & 92.32\% & $[647.3,\; 20.0,\; 5.0]$ & $[-1.047,\; 0.200]$ \\
-Heat-Exchanger & 1000.0 & $[1.0,\; 0.1,\; 19.3]$ & $[50.0,\; 0.0]$ \\
-PSA & $-0.6433$ & $[3.97,\; 0.1,\; 10.0]$ & $[6.04,\; 19.6]$ \\
-Batch-Reactor & $-1.749$ & $[500,\; 4.39,\; 5.0]$ & $[-1.01,\; 2.00]$ \\
-Distillation & 11{,}758 & $[1.0,\; 11.0,\; 0.5]$ & $[19.8,\; 9.99]$ \\
-Evaporator & $-1.959$ & $[4.09,\; 19.1,\; 5.0]$ & $[120.5,\; 2.0]$ \\
-Membrane & 11.00 & $[10.0,\; 0.1,\; 1.0]$ & $[0.30,\; 5.13]$ \\
-Williams-Otto & 5.470 & $[581.9,\; 50.0,\; 50.0]$ & $[12.6,\; 6.11]$ \\
+CSTR & 92.32\% & $[647.2, 20.0, 5.0]$ & $[-1.047, 0.200]$ \\
+Heat-Exchanger & 1000.0 & $[1.0, 0.1, 39.6]$ & $[50.0, 0.0]$ \\
+PSA & $-0.6433$ & $[3.97, 0.1, 10.0]$ & $[6.04, 19.6]$ \\
+Batch-Reactor & $-1.749$ & $[500, 4.39, 5.0]$ & $[-1.0, 2.0]$ \\
+Distillation & 11{,}758 & $[1.0, 11.0, 0.5]$ & $[20.0, 10.0]$ \\
+Evaporator & $-1.959$ & $[4.09, 19.1, 5.0]$ & $[120.5, 2.0]$ \\
+Membrane & 11.00 & $[10.0, 0.1, 1.0]$ & $[0.30, 5.13]$ \\
+Williams-Otto & 5.460 & $[581.6, 50.0, 50.0]$ & $[12.6, 6.11]$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1411,11 +1417,9 @@ Let $(x^{\WB}, x^{\BB})$ be feasible for~\eqref{eq:full_problem} with $y = f^{\B
 Let $\tilde{x}^{\BB}$ be outer-feasible with $\tilde{y} = f^{\BB}(\tilde{x}^{\BB})$ and inner solution $\tilde{x}^{\WB\star}$. By construction, $\tilde{x}^{\WB\star}$ satisfies $f^{\WB}(\tilde{x}^{\WB\star}, \tilde{y}) = 0$, $g(\tilde{x}^{\WB\star}, \tilde{y}, \tilde{x}^{\BB}) \leq 0$, and $\tilde{x}^{\WB\star} \in \mathcal{X}^{\WB}$. Together with $\tilde{x}^{\BB} \in \mathcal{X}^{\BB}$, the pair $(\tilde{x}^{\WB\star}, \tilde{x}^{\BB})$ is feasible for~\eqref{eq:full_problem} with objective $J(\tilde{x}^{\WB\star}, \tilde{y}, \tilde{x}^{\BB})$.
 
 \emph{(iii) Infeasibility.}
-If the inner problem is infeasible for some $\tilde{y} \in \text{range}(f^{\BB})$---i.e., no $x^{\WB} \in \mathcal{X}^{\WB}$ satisfies $f^{\WB}(x^{\WB}, \tilde{y}) = 0$ and $g(x^{\WB}, \tilde{y}, \tilde{x}^{\BB}) \leq 0$---then no feasible point of~\eqref{eq:full_problem} exists at this $\tilde{x}^{\BB}$ either, so excluding it from the outer search does not lose optimality.
+If the inner NLP is infeasible for some $\tilde{y} \in \text{range}(f^{\BB})$---i.e., no $x^{\WB} \in \mathcal{X}^{\WB}$ satisfies $f^{\WB}(x^{\WB}, \tilde{y}) = 0$ and $g(x^{\WB}, \tilde{y}, \tilde{x}^{\BB}) \leq 0$---then no feasible point of~\eqref{eq:full_problem} exists at this $\tilde{x}^{\BB}$ either, so excluding it from the outer search does not lose optimality.
 
-From (i) and (ii), the feasible sets project onto each other with preserved objectives, so $\inf(\text{bilevel}) = \inf(\text{original})$. To see how a global optimum of~\eqref{eq:full_problem} appears in~\eqref{eq:bilevel}: let $(x^{\WB\star\star}, x^{\BB\star\star})$ be a global minimizer of~\eqref{eq:full_problem} with $y^{\star\star} = f^{\BB}(x^{\BB\star\star})$. By step (i), $x^{\BB\star\star}$ is outer-feasible in~\eqref{eq:bilevel}, and the inner problem at $x^{\BB\star\star}$ returns some $\hat{x}^{\WB}$ with $J(\hat{x}^{\WB}, y^{\star\star}, x^{\BB\star\star}) \leq J(x^{\WB\star\star}, y^{\star\star}, x^{\BB\star\star})$. Since $(x^{\WB\star\star}, x^{\BB\star\star})$ is already globally optimal for~\eqref{eq:full_problem}, the inequality must hold with equality: $\hat{x}^{\WB} = x^{\WB\star\star}$ (up to alternative optima with the same objective value). Thus the bilevel formulation recovers both the optimal $x^{\BB\star\star}$ at the outer level and the optimal $x^{\WB\star\star}$ at the inner level.
-
-Assumption~\ref{ass:separability}(ii) is used in step (i) to ensure the inner global optimum is attained, and in step (ii) to ensure the inner solution is globally optimal (not merely a local minimum). The surrogate in Algorithm~\ref{alg:bilevel_bo} models $J(x^{\WB\star}(x^{\BB}), f^{\BB}(x^{\BB}), x^{\BB}):\mathbb{R}^{n_\BB} \times \mathbb{R}^{n_y} \times \mathbb{R}^{n_\WB} \mapsto \mathbb{R}$, which is a function of $n_{\BB}$ variables.
+From (i) and (ii), the feasible sets project onto each other with preserved objectives, so $\inf(\text{bilevel}) = \inf(\text{original})$. Assumption~\ref{ass:separability}(ii) is used in step (i) to ensure the inner global optimum is attained, and in step (ii) to ensure the inner solution is globally optimal (not merely a local minimum). The surrogate in Algorithm~\ref{alg:bilevel_bo} models $x^{\BB} \mapsto J(x^{\WB\star}(x^{\BB}), f^{\BB}(x^{\BB}), x^{\BB})$, which is a function of $n_{\BB}$ variables.
 \end{proof}
 
 %% ============================================================================
@@ -1423,9 +1427,9 @@ Assumption~\ref{ass:separability}(ii) is used in step (i) to ensure the inner gl
 %% ============================================================================
 \section{Implementation Details}\label{sec:implementation_details}
 
-\emph{Infeasibility handling.} If the inner problem is infeasible for some $y$---because the black-box outputs lead to a white-box problem with no feasible solution---we return a large penalty value. The acquisition function naturally steers away from these regions without requiring explicit constraint modeling at the outer level.
+\emph{Infeasibility handling.} If the inner NLP is infeasible for some $y$---because the black-box outputs lead to a white-box problem with no feasible solution---we return a large penalty value. The acquisition function naturally steers away from these regions without requiring explicit constraint modeling at the outer level.
 
-\emph{Modularity.} The inner optimizer can be swapped (DE, SLSQP, IPOPT, BARON) without changing the outer BO framework. Similarly, any acquisition function (EI, PI, LCB) can be used in the outer loop.
+\emph{Modularity.} The inner NLP solver can be swapped (SLSQP, IPOPT, BARON) without changing the outer BO framework. Similarly, any acquisition function (EI, PI, LCB) can be used in the outer loop.
 
 %% ============================================================================
 %% APPENDIX H: CONVERGENCE SPEED
@@ -1519,7 +1523,7 @@ Williams-Otto           & 0.001 \\
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{figs/xi_heatmap.pdf}
-    \caption{Sensitivity to the EI exploration parameter $\xi$. Left: bilevel BO; right: black-box BO. Rows are problems, columns are $\xi$ values, aggregated over all $n_\text{init}$. Cell values show log$_{10}$(median final regret); bold indicates best $\xi$ per problem. No single $\xi$ is universally optimal, but bilevel BO outperforms BB-BO regardless of $\xi$.}
+    \caption{Sensitivity to the EI exploration parameter $\xi$. Left: bilevel BO; right: black-box BO. Rows are problems, columns are $\xi$ values, aggregated over all $n_\text{init}$. Cell values show log$_{10}$(median final regret); bold indicates best $\xi$ per problem. No single $\xi$ is universally optimal, but bilevel BO dominates BB-BO regardless of $\xi$.}
     \label{fig:xi_heatmap}
 \end{figure}
 
