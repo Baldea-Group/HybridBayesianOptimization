@@ -57,7 +57,8 @@ def compute_grid_layout(n_items: int, n_rows: int = DEFAULT_NROWS) -> tuple:
 METHOD_COLORS = {
     'blackbox_bo': '#0173B2',   # blue
     'bilevel_bo': '#D55E00',    # vermillion/orange-red
-    'nlp': '#949494'            # gray
+    'nlp': '#949494',           # gray
+    'global_de': '#029E73',     # green
 }
 
 
@@ -79,8 +80,18 @@ def print_summary(all_results: Dict[str, Any], n_repetitions: int):
         nlp_Js = np.array(res['blackbox_nlp']['best_Js'])
         nlp_regrets = np.array(res['blackbox_nlp']['final_regrets'])
         print(f"\nBlack-box NLP:")
-        print(f"  Best J: {np.mean(nlp_Js):.4f} ± {np.std(nlp_Js):.4f}")
-        print(f"  Regret: {np.mean(nlp_regrets):.4f} ± {np.std(nlp_regrets):.4f}")
+        print(f"  Best J: {np.mean(nlp_Js):.4f} +/- {np.std(nlp_Js):.4f}")
+        print(f"  Regret: {np.mean(nlp_regrets):.4f} +/- {np.std(nlp_regrets):.4f}")
+
+        # Global DE result (independent of acquisition)
+        if 'global_de' in res and len(res['global_de'].get('best_Js', [])) > 0:
+            de_Js = np.array(res['global_de']['best_Js'])
+            de_regrets = np.array(res['global_de']['final_regrets'])
+            de_evals = np.array(res['global_de']['n_fbb_evals'])
+            print(f"\nGlobal DE:")
+            print(f"  Best J: {np.mean(de_Js):.4f} +/- {np.std(de_Js):.4f}")
+            print(f"  Regret (at BO budget): {np.mean(de_regrets):.4f} +/- {np.std(de_regrets):.4f}")
+            print(f"  Total evals: {np.mean(de_evals):.0f} +/- {np.std(de_evals):.0f}")
 
         # Table header for BO methods
         print(f"\n{'Method':<15} {'Acquisition':<12} {'Best J':<20} {'Final Regret':<20}")
@@ -112,11 +123,17 @@ def print_summary(all_results: Dict[str, Any], n_repetitions: int):
     print("\n\n" + "=" * 100)
     print("BEST ACQUISITION FUNCTION PER PROBLEM (by final regret)")
     print("=" * 100)
-    print(f"{'Problem':<20} {'Best BB-BO':<25} {'Best Bi-level BO':<25}")
-    print("-" * 70)
+    print(f"{'Problem':<20} {'Global DE':<20} {'Best BB-BO':<25} {'Best Bi-level BO':<25}")
+    print("-" * 90)
 
     for name, res in all_results.items():
         acquisitions = res.get('acquisitions', ['ei'])
+
+        # Global DE regret
+        de_str = "N/A"
+        if 'global_de' in res and len(res['global_de'].get('final_regrets', [])) > 0:
+            de_regret = np.mean(res['global_de']['final_regrets'])
+            de_str = f"{de_regret:.4f}"
 
         # Find best BB-BO
         best_bo_acq = None
@@ -142,7 +159,7 @@ def print_summary(all_results: Dict[str, Any], n_repetitions: int):
 
         bo_str = f"{best_bo_acq.upper()} ({best_bo_regret:.4f})" if best_bo_acq else "N/A"
         bi_str = f"{best_bi_acq.upper()} ({best_bi_regret:.4f})" if best_bi_acq else "N/A"
-        print(f"{name:<20} {bo_str:<25} {bi_str:<25}")
+        print(f"{name:<20} {de_str:<20} {bo_str:<25} {bi_str:<25}")
 
 
 def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Path] = None):
@@ -162,10 +179,7 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
     if single_acq_mode:
         # Single acquisition: plot both methods on same subplot
         n_rows, n_cols = compute_grid_layout(n_problems)
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows))
-        if n_problems == 1:
-            axes = np.array([[axes]])
-        axes = np.atleast_2d(axes)
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows), squeeze=False)
 
         acq = acquisitions_used[0]
 
@@ -225,6 +239,27 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
                     ax.fill_between(iters, np.maximum(mean_regret - ci, 1e-10),
                                    mean_regret + ci, color=METHOD_COLORS['bilevel_bo'], alpha=0.15)
 
+            # Global DE regret curve
+            if 'global_de' in res and len(res['global_de'].get('regrets', [])) > 0:
+                de_regrets_list = res['global_de']['regrets']
+                valid_de = [r for r in de_regrets_list if not np.all(np.isinf(r))]
+                if len(valid_de) > 0:
+                    min_len = min(len(r) for r in valid_de)
+                    de_regrets = np.array([r[:min_len] for r in valid_de])
+                    mean_regret = np.mean(de_regrets, axis=0)
+                    sem = stats.sem(de_regrets, axis=0)
+                    ci = 1.96 * sem
+
+                    valid_y = mean_regret[mean_regret > 0]
+                    if len(valid_y) > 0:
+                        all_y_values.extend(valid_y)
+
+                    iters = range(1, min_len + 1)
+                    ax.plot(iters, mean_regret, color=METHOD_COLORS['global_de'],
+                           linestyle='-', label='Global DE', linewidth=2)
+                    ax.fill_between(iters, np.maximum(mean_regret - ci, 1e-10),
+                                   mean_regret + ci, color=METHOD_COLORS['global_de'], alpha=0.15)
+
             # Add NLP reference line
             if 'final_regrets' in res['blackbox_nlp']:
                 regrets_nlp = np.array(res['blackbox_nlp']['final_regrets'])
@@ -234,14 +269,15 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
                 ax.axhline(y=mean_nlp, color=METHOD_COLORS['nlp'], linestyle=':',
                           label=f'NLP ({mean_nlp:.4f})', linewidth=1.5, alpha=0.7)
 
-            # Set axis limits
-            if len(all_y_values) > 0:
-                y_min = max(min(all_y_values) * 0.5, 1e-10)
-                y_max = max(all_y_values) * 2.0
+            # Set axis limits (filter out inf/nan)
+            finite_y = [v for v in all_y_values if np.isfinite(v) and v > 0]
+            if len(finite_y) > 0:
+                y_min = max(min(finite_y) * 0.5, 1e-10)
+                y_max = max(finite_y) * 2.0
                 ax.set_ylim(y_min, y_max)
 
             # Format axis
-            ax.set_xlabel('Iteration')
+            ax.set_xlabel('Evaluation')
             ax.set_ylabel('Regret')
             ax.set_title(f'{name}\n(J* = {J_optimal:.4f}, Acq: {acq.upper()})')
             ax.legend(loc='upper right', fontsize=8)
@@ -259,13 +295,8 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
     else:
         # Multiple acquisitions: separate rows for BB-BO and Bi-level BO
         n_rows, n_cols = compute_grid_layout(n_problems)
-        fig, axes_bb = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows))
-        fig_bi, axes_bi = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows))
-        if n_problems == 1:
-            axes_bb = np.array([[axes_bb]])
-            axes_bi = np.array([[axes_bi]])
-        axes_bb = np.atleast_2d(axes_bb)
-        axes_bi = np.atleast_2d(axes_bi)
+        fig, axes_bb = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows), squeeze=False)
+        fig_bi, axes_bi = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows), squeeze=False)
 
         for idx, (name, res) in enumerate(all_results.items()):
             row, col = divmod(idx, n_cols)
@@ -335,6 +366,21 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
                         ax_bi.fill_between(iters, np.maximum(mean_regret - ci, 1e-10),
                                           mean_regret + ci, color=color, alpha=0.15)
 
+            # Add Global DE reference curve to both
+            if 'global_de' in res and len(res['global_de'].get('regrets', [])) > 0:
+                valid_de = [r for r in res['global_de']['regrets'] if not np.all(np.isinf(r))]
+                if len(valid_de) > 0:
+                    min_len = min(len(r) for r in valid_de)
+                    de_regrets = np.array([r[:min_len] for r in valid_de])
+                    mean_de = np.mean(de_regrets, axis=0)
+                    valid_y = mean_de[mean_de > 0]
+                    if len(valid_y) > 0:
+                        all_y_values.extend(valid_y)
+                    de_iters = range(1, min_len + 1)
+                    for ax in [ax_bb, ax_bi]:
+                        ax.plot(de_iters, mean_de, color=METHOD_COLORS['global_de'],
+                                linestyle='--', label='Global DE', linewidth=1.5, alpha=0.8)
+
             # Add NLP reference line to both
             if 'final_regrets' in res['blackbox_nlp']:
                 regrets_nlp = np.array(res['blackbox_nlp']['final_regrets'])
@@ -345,16 +391,17 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
                     ax.axhline(y=mean_nlp, color='black', linestyle=':',
                               label=f'NLP ({mean_nlp:.4f})', linewidth=1.5, alpha=0.7)
 
-            # Set shared y-axis limits for top and bottom plots
-            if len(all_y_values) > 0:
-                y_min = max(min(all_y_values) * 0.5, 1e-10)
-                y_max = max(all_y_values) * 2.0
+            # Set shared y-axis limits for top and bottom plots (filter inf/nan)
+            finite_y = [v for v in all_y_values if np.isfinite(v) and v > 0]
+            if len(finite_y) > 0:
+                y_min = max(min(finite_y) * 0.5, 1e-10)
+                y_max = max(finite_y) * 2.0
                 ax_bb.set_ylim(y_min, y_max)
                 ax_bi.set_ylim(y_min, y_max)
 
             # Format axes
             for ax, method_name in [(ax_bb, 'Black-box BO'), (ax_bi, 'Bi-level BO')]:
-                ax.set_xlabel('Iteration')
+                ax.set_xlabel('Evaluation')
                 ax.set_ylabel('Regret')
                 ax.set_title(f'{name} - {method_name}\n(J* = {J_optimal:.4f})')
                 ax.legend(loc='upper right', fontsize=8)
@@ -386,10 +433,7 @@ def plot_final_regret_bars(all_results: Dict[str, Any], save_dir: Optional[Path]
     n_problems = len(all_results)
     n_rows, n_cols = compute_grid_layout(n_problems)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 6*n_rows))
-    if n_problems == 1:
-        axes = np.array([[axes]])
-    axes = np.atleast_2d(axes)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 6*n_rows), squeeze=False)
 
     for idx, (name, res) in enumerate(all_results.items()):
         row, col = divmod(idx, n_cols)
@@ -427,15 +471,21 @@ def plot_final_regret_bars(all_results: Dict[str, Any], save_dir: Optional[Path]
         width = 0.35
 
         ax.bar(x - width/2, bb_means, width, yerr=bb_stds,
-               label='Black-box BO', color='steelblue', alpha=0.8, capsize=3)
+               label='Black-box BO', color=METHOD_COLORS['blackbox_bo'], alpha=0.8, capsize=3)
         ax.bar(x + width/2, bi_means, width, yerr=bi_stds,
-               label='Bi-level BO', color='coral', alpha=0.8, capsize=3)
+               label='Bi-level BO', color=METHOD_COLORS['bilevel_bo'], alpha=0.8, capsize=3)
 
         # Add NLP reference
         if 'final_regrets' in res['blackbox_nlp']:
             mean_nlp = np.mean(res['blackbox_nlp']['final_regrets'])
-            ax.axhline(y=mean_nlp, color='green', linestyle='--',
+            ax.axhline(y=mean_nlp, color=METHOD_COLORS['nlp'], linestyle='--',
                       label=f'NLP ({mean_nlp:.4f})', linewidth=2)
+
+        # Add Global DE reference
+        if 'global_de' in res and len(res['global_de'].get('final_regrets', [])) > 0:
+            mean_de = np.mean(res['global_de']['final_regrets'])
+            ax.axhline(y=mean_de, color=METHOD_COLORS['global_de'], linestyle='--',
+                      label=f'Global DE ({mean_de:.4f})', linewidth=2)
 
         ax.set_xlabel('Acquisition Function')
         ax.set_ylabel('Final Regret')
@@ -467,9 +517,10 @@ def plot_method_comparison(all_results: Dict[str, Any], save_dir: Optional[Path]
 
     problem_names = list(all_results.keys())
     x = np.arange(len(problem_names))
-    width = 0.25
+    width = 0.2
 
     nlp_regrets = []
+    de_regrets = []
     best_bb_regrets = []
     best_bi_regrets = []
     best_bb_acqs = []
@@ -481,6 +532,12 @@ def plot_method_comparison(all_results: Dict[str, Any], save_dir: Optional[Path]
 
         # NLP
         nlp_regrets.append(np.mean(res['blackbox_nlp']['final_regrets']))
+
+        # Global DE
+        if 'global_de' in res and len(res['global_de'].get('final_regrets', [])) > 0:
+            de_regrets.append(np.mean(res['global_de']['final_regrets']))
+        else:
+            de_regrets.append(np.inf)
 
         # Best BB-BO
         best_bb = np.inf
@@ -508,9 +565,14 @@ def plot_method_comparison(all_results: Dict[str, Any], save_dir: Optional[Path]
         best_bi_regrets.append(best_bi)
         best_bi_acqs.append(best_bi_acq)
 
-    bars1 = ax.bar(x - width, nlp_regrets, width, label='NLP', color='green', alpha=0.7)
-    bars2 = ax.bar(x, best_bb_regrets, width, label='Best BB-BO', color='steelblue', alpha=0.7)
-    bars3 = ax.bar(x + width, best_bi_regrets, width, label='Best Bi-level', color='coral', alpha=0.7)
+    bars1 = ax.bar(x - 1.5*width, nlp_regrets, width, label='NLP',
+                   color=METHOD_COLORS['nlp'], alpha=0.7)
+    bars_de = ax.bar(x - 0.5*width, de_regrets, width, label='Global DE',
+                     color=METHOD_COLORS['global_de'], alpha=0.7)
+    bars2 = ax.bar(x + 0.5*width, best_bb_regrets, width, label='Best BB-BO',
+                   color=METHOD_COLORS['blackbox_bo'], alpha=0.7)
+    bars3 = ax.bar(x + 1.5*width, best_bi_regrets, width, label='Best Bi-level',
+                   color=METHOD_COLORS['bilevel_bo'], alpha=0.7)
 
     # Add acquisition labels on bars
     for i, (bar, acq) in enumerate(zip(bars2, best_bb_acqs)):
@@ -543,10 +605,7 @@ def plot_wall_time(all_results: Dict[str, Any], save_dir: Optional[Path] = None)
     n_problems = len(all_results)
     n_rows, n_cols = compute_grid_layout(n_problems)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 6*n_rows))
-    if n_problems == 1:
-        axes = np.array([[axes]])
-    axes = np.atleast_2d(axes)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 6*n_rows), squeeze=False)
 
     for idx, (name, res) in enumerate(all_results.items()):
         row, col = divmod(idx, n_cols)
@@ -594,6 +653,12 @@ def plot_wall_time(all_results: Dict[str, Any], save_dir: Optional[Path] = None)
             ax.axhline(y=mean_nlp, color=METHOD_COLORS['nlp'], linestyle='--',
                       label=f'NLP ({mean_nlp:.2f}s)', linewidth=2)
 
+        # Add Global DE reference line
+        if 'global_de' in res and len(res['global_de'].get('wall_times', [])) > 0:
+            mean_de = np.mean(res['global_de']['wall_times'])
+            ax.axhline(y=mean_de, color=METHOD_COLORS['global_de'], linestyle='--',
+                      label=f'Global DE ({mean_de:.2f}s)', linewidth=2)
+
         ax.set_xlabel('Acquisition Function')
         ax.set_ylabel('Wall Time (seconds)')
         ax.set_title(f'{name}')
@@ -629,10 +694,7 @@ def plot_time_per_iteration(all_results: Dict[str, Any], save_dir: Optional[Path
     if single_acq_mode:
         # Single acquisition: plot both methods on same subplot
         n_rows, n_cols = compute_grid_layout(n_problems)
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows))
-        if n_problems == 1:
-            axes = np.array([[axes]])
-        axes = np.atleast_2d(axes)
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows), squeeze=False)
 
         acq = acquisitions_used[0]
 
@@ -692,13 +754,8 @@ def plot_time_per_iteration(all_results: Dict[str, Any], save_dir: Optional[Path
     else:
         # Multiple acquisitions: separate figures for BB-BO and Bi-level BO
         n_rows, n_cols = compute_grid_layout(n_problems)
-        fig, axes_bb = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows))
-        fig_bi, axes_bi = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows))
-        if n_problems == 1:
-            axes_bb = np.array([[axes_bb]])
-            axes_bi = np.array([[axes_bi]])
-        axes_bb = np.atleast_2d(axes_bb)
-        axes_bi = np.atleast_2d(axes_bi)
+        fig, axes_bb = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows), squeeze=False)
+        fig_bi, axes_bi = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows), squeeze=False)
 
         for idx, (name, res) in enumerate(all_results.items()):
             row, col = divmod(idx, n_cols)

@@ -33,7 +33,7 @@ Problems included:
 import numpy as np
 from typing import Tuple, Callable, Optional
 from dataclasses import dataclass, field
-from scipy.optimize import minimize, OptimizeResult
+from scipy.optimize import minimize, differential_evolution, NonlinearConstraint, OptimizeResult
 
 
 # =============================================================================
@@ -356,12 +356,58 @@ class BiLevelProblem:
 
         return best_res
 
+    def solve_inner_problem_global(
+        self,
+        y: np.ndarray,
+        seed: Optional[int] = None
+    ) -> OptimizeResult:
+        """
+        Solve inner optimization problem using differential evolution (global).
+
+        Same interface as solve_inner_problem but uses DE instead of
+        multi-start local optimization.
+
+        Args:
+            y: Black-box outputs (fixed for inner problem)
+            seed: Random seed for DE reproducibility
+
+        Returns:
+            scipy OptimizeResult with optimal x^{WB}* and J(x^{WB}*, y)
+        """
+        sign = -1.0 if self.maximize else 1.0
+
+        def objective(x_wb):
+            return sign * self.J(x_wb, y)
+
+        bounds = list(zip(self.x_wb_lower, self.x_wb_upper))
+
+        constraints = ()
+        if self.g is not None:
+            nlc = NonlinearConstraint(
+                lambda x_wb: self.g(x_wb, y), -np.inf, 0.0
+            )
+            constraints = (nlc,)
+
+        res = differential_evolution(
+            objective,
+            bounds=bounds,
+            seed=seed,
+            polish=True,
+            constraints=constraints,
+        )
+
+        # Convert back to original objective value
+        res.fun = sign * res.fun
+
+        return res
+
     def evaluate_bilevel(
         self,
         x_bb: np.ndarray,
         n_starts: int = 10,
         rng: Optional[np.random.Generator] = None,
-        return_x_wb: bool = False
+        return_x_wb: bool = False,
+        inner_solver: str = 'global'
     ) -> float | Tuple[float, np.ndarray]:
         """
         Evaluate bi-level objective: solve inner problem for given x^{BB}.
@@ -374,13 +420,19 @@ class BiLevelProblem:
             n_starts: Number of multi-start attempts for inner problem
             rng: Random number generator
             return_x_wb: If True, also return optimal x^{WB}*
+            inner_solver: 'multistart' for multi-start SLSQP or 'global' for
+                          differential evolution
 
         Returns:
             If return_x_wb=False: optimal objective J*(x^{BB})
             If return_x_wb=True: tuple (J*(x^{BB}), x^{WB}*)
         """
         y = self.evaluate_fbb(x_bb)
-        res = self.solve_inner_problem(y, n_starts=n_starts, rng=rng)
+        if inner_solver == 'global':
+            seed = int(rng.integers(0, 2**31)) if rng is not None else None
+            res = self.solve_inner_problem_global(y, seed=seed)
+        else:
+            res = self.solve_inner_problem(y, n_starts=n_starts, rng=rng)
 
         if return_x_wb:
             return res.fun, res.x
@@ -726,7 +778,7 @@ def create_small_feasible_region() -> BiLevelProblem:
         J_grad_x_wb=_small_feasible_region2_J_grad_x_wb,
         g_grad_x_wb=_small_feasible_region2_g_grad_x_wb,
         x_wb_optimal=np.array([3 * np.pi / 2]),
-        x_bb_optimal=np.array([np.arcsin(0.95)]),
+        x_bb_optimal=np.array([1.25323589]),
         J_optimal=0.253236,
         maximize=False
     )
@@ -1539,8 +1591,8 @@ def create_cstr(constrained: bool = True) -> BiLevelProblem:
         g=_cstr_g if constrained else None,
         J_grad_x_wb=_cstr_J_grad_x_wb,
         g_grad_x_wb=_cstr_g_grad_x_wb if constrained else None,
-        x_wb_optimal=np.array([647.25, 20.0, 5.0]),
-        x_bb_optimal=np.array([-1.047, 0.2]),
+        x_wb_optimal=np.array([647.254, 20.0, 5.0]),
+        x_bb_optimal=np.array([-1.0471, 0.2]),
         J_optimal=92.324046,  # Yield of B at optimal (%)
         maximize=True
     )
@@ -1696,7 +1748,7 @@ def create_heat_exchanger() -> BiLevelProblem:
         g=_heat_exchanger_g,
         J_grad_x_wb=_heat_exchanger_J_grad_x_wb,
         g_grad_x_wb=_heat_exchanger_g_grad_x_wb,
-        x_wb_optimal=np.array([1.0, 0.1, 39.59]),
+        x_wb_optimal=np.array([1.0, 0.1, 19.337]),
         x_bb_optimal=np.array([50.0, 0.0]),
         J_optimal=1000.0,
         maximize=False
@@ -1862,9 +1914,9 @@ def create_psa() -> BiLevelProblem:
         g=_psa_g,
         J_grad_x_wb=_psa_J_grad_x_wb,
         g_grad_x_wb=_psa_g_grad_x_wb,
-        x_wb_optimal=np.array([3.97, 0.1, 10.0]),
-        x_bb_optimal=np.array([6.04, 19.55]),
-        J_optimal=-0.6433,
+        x_wb_optimal=np.array([3.971, 0.1, 10.0]),
+        x_bb_optimal=np.array([6.037, 19.552]),
+        J_optimal=-0.64329,
         maximize=False
     )
 
@@ -2048,7 +2100,7 @@ def create_batch_reactor() -> BiLevelProblem:
         J_grad_x_wb=_batch_reactor_J_grad_x_wb,
         g_grad_x_wb=None,  # Complex, numerical gradients OK
         x_wb_optimal=np.array([500.0, 4.394, 5.0]),
-        x_bb_optimal=np.array([-1.0, 2.0]),
+        x_bb_optimal=np.array([-1.006, 2.0]),
         J_optimal=-1.748818,
         maximize=False
     )
@@ -2225,8 +2277,8 @@ def create_distillation() -> BiLevelProblem:
         g=_distillation_g,
         J_grad_x_wb=_distillation_J_grad_x_wb,
         g_grad_x_wb=_distillation_g_grad_x_wb,
-        x_wb_optimal=np.array([1.0, 11.0, 0.5]),
-        x_bb_optimal=np.array([20.0, 10.0]),
+        x_wb_optimal=np.array([1.0, 11.005, 0.5]),
+        x_bb_optimal=np.array([19.839, 9.991]),
         J_optimal=11758.152,
         maximize=False
     )
@@ -2397,8 +2449,8 @@ def create_evaporator() -> BiLevelProblem:
         g=_evaporator_g,
         J_grad_x_wb=_evaporator_J_grad_x_wb,
         g_grad_x_wb=_evaporator_g_grad_x_wb,
-        x_wb_optimal=np.array([4.09, 19.07, 5.0]),
-        x_bb_optimal=np.array([120.47, 2.0]),
+        x_wb_optimal=np.array([4.095, 19.067, 5.0]),
+        x_bb_optimal=np.array([120.475, 2.0]),
         J_optimal=-1.9587,
         maximize=False
     )
@@ -2576,7 +2628,7 @@ def create_membrane() -> BiLevelProblem:
         J_grad_x_wb=_membrane_J_grad_x_wb,
         g_grad_x_wb=_membrane_g_grad_x_wb,
         x_wb_optimal=np.array([10.0, 0.1, 1.0]),
-        x_bb_optimal=np.array([0.3, 5.13]),
+        x_bb_optimal=np.array([0.3, 5.132]),
         J_optimal=10.996624,
         maximize=False
     )
@@ -2796,9 +2848,9 @@ def create_williams_otto() -> BiLevelProblem:
         g=_williams_otto_g,
         J_grad_x_wb=None,  # Complex due to implicit mass balances
         g_grad_x_wb=None,
-        x_wb_optimal=np.array([581.6, 50.0, 50.0]),
-        x_bb_optimal=np.array([12.61, 6.11]),
-        J_optimal=5.469763,
+        x_wb_optimal=np.array([581.872, 50.0, 50.0]),
+        x_bb_optimal=np.array([12.607, 6.114]),
+        J_optimal=5.469762,
         maximize=True
     )
 
