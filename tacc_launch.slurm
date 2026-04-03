@@ -12,9 +12,6 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-mkdir -p results_parallel
-mkdir -p logs
-
 # Activate conda environment
 eval "$(conda shell.bash hook)"
 conda activate bo

@@ -59,6 +59,10 @@ def main():
         f.write('\n'.join(commands) + '\n')
     print(f"Wrote {len(commands)} commands to {cmd_file}")
 
+    # Create output directories
+    (repo_root / args.outdir).mkdir(parents=True, exist_ok=True)
+    (repo_root / 'logs').mkdir(exist_ok=True)
+
     n_tasks = len(commands)
     max_idx = n_tasks - 1
 
@@ -76,9 +80,6 @@ def main():
 # cd to repo root (script lives at repo root)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
-
-mkdir -p {args.outdir}
-mkdir -p logs
 
 # Activate conda environment
 eval "$(conda shell.bash hook)"
