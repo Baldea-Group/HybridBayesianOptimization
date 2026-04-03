@@ -4,9 +4,14 @@ A framework for simultaneous process and material co-design using bi-level Bayes
 
 ## Setup
 
+Requires Python >= 3.9.
+
 ```bash
 conda activate bo
+pip install -r requirements.txt
 ```
+
+Dependencies: NumPy, SciPy (>= 1.7 for `scipy.stats.qmc`), scikit-learn, Matplotlib.
 
 ## Quick Start
 
