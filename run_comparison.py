@@ -272,6 +272,51 @@ def run_experiments(
     return all_results
 
 
+def _load_cached_results(filepath, settings, acquisitions, n_repetitions):
+    """Return cached results if they exist and match settings, else None."""
+    if not filepath.exists():
+        return None
+    try:
+        with open(filepath, 'rb') as f:
+            saved_data = pickle.load(f)
+    except Exception as e:
+        print(f"Error loading {filepath}: {e}. Re-running experiments...")
+        return None
+
+    saved_settings = saved_data.get('settings', {})
+    saved_results = saved_data.get('results', {})
+
+    if not all(saved_settings.get(k) == v for k, v in settings.items()):
+        print("Found results but settings differ. Re-running experiments...")
+        return None
+
+    for name in settings['problem_names']:
+        if name not in saved_results:
+            print(f"Found results but missing problem {name}. Re-running...")
+            return None
+        res = saved_results[name]
+        if len(res['blackbox_nlp']['final_regrets']) < n_repetitions:
+            print(f"Found results but {name} incomplete. Re-running...")
+            return None
+        de_res = res.get('global_de', {})
+        if len(de_res.get('final_regrets', [])) < n_repetitions:
+            print(f"Found results but {name} DE incomplete. Re-running...")
+            return None
+        for acq in acquisitions:
+            bo_key = f'blackbox_bo_{acq}'
+            bi_key = f'bilevel_bo_{acq}'
+            if bo_key not in res or bi_key not in res:
+                print(f"Found results but {name} missing {acq}. Re-running...")
+                return None
+            if (len(res[bo_key]['regrets']) < n_repetitions or
+                    len(res[bi_key]['regrets']) < n_repetitions):
+                print(f"Found results but {name}/{acq} incomplete. Re-running...")
+                return None
+
+    print(f"Skipping — complete results found in {filepath.name}")
+    return saved_results
+
+
 def main(
     problem_set: str = 'cobalt',
     acquisitions: List[str] = None,
@@ -388,61 +433,11 @@ def main(
                 else:
                     combo_results_file = base_path
 
-            # Check if results file exists and has matching settings
-            run_experiments_flag = True
-            if combo_results_file.exists():
-                try:
-                    with open(combo_results_file, 'rb') as f:
-                        saved_data = pickle.load(f)
+            # Check if complete results already exist
+            all_results = _load_cached_results(combo_results_file, settings,
+                                               acquisitions, n_repetitions)
 
-                    saved_settings = saved_data.get('settings', {})
-                    saved_results = saved_data.get('results', {})
-
-                    settings_match = all(
-                        saved_settings.get(k) == v for k, v in settings.items()
-                    )
-
-                    if settings_match:
-                        all_complete = True
-                        for name in settings['problem_names']:
-                            if name not in saved_results:
-                                all_complete = False
-                                break
-                            res = saved_results[name]
-                            if len(res['blackbox_nlp']['final_regrets']) < n_repetitions:
-                                all_complete = False
-                                break
-                            # Check global DE
-                            de_res = res.get('global_de', {})
-                            if len(de_res.get('final_regrets', [])) < n_repetitions:
-                                all_complete = False
-                                break
-                            # Check all acquisition functions
-                            for acq in acquisitions:
-                                bo_key = f'blackbox_bo_{acq}'
-                                bi_key = f'bilevel_bo_{acq}'
-                                if bo_key not in res or bi_key not in res:
-                                    all_complete = False
-                                    break
-                                if (len(res[bo_key]['regrets']) < n_repetitions or
-                                    len(res[bi_key]['regrets']) < n_repetitions):
-                                    all_complete = False
-                                    break
-
-                        if all_complete:
-                            print("Found existing results with matching settings.")
-                            print("Loading cached results...")
-                            all_results = saved_results
-                            run_experiments_flag = False
-                        else:
-                            print("Found results but experiments incomplete. Re-running...")
-                    else:
-                        print("Found results but settings differ. Re-running experiments...")
-
-                except Exception as e:
-                    print(f"Error loading results: {e}. Re-running experiments...")
-
-            if run_experiments_flag:
+            if all_results is None:
                 all_results = run_experiments(problems, settings, acquisitions, verbose=True)
 
                 # Save results
@@ -451,26 +446,22 @@ def main(
                 with open(combo_results_file, 'wb') as f:
                     pickle.dump({'settings': settings, 'results': all_results}, f)
                 print("Results saved.")
-            else:
-                # Results already exist and were loaded - skip this combination
-                print(f"Skipping n_init={n_initial}, xi={xi} - results already exist.")
-                continue
 
-            # Store results for this combination
+                # Print summary for this combination
+                print_summary(all_results, n_repetitions)
+
+                # Plot results for this combination
+                if save_plots:
+                    print("\n" + "=" * 70)
+                    print(f"Generating plots for n_init={n_initial}, xi={xi}...")
+                    print("=" * 70)
+                    n_init_arg = n_initial if len(n_initial_values) > 1 else None
+                    xi_arg = xi if len(xi_values) > 1 else None
+                    save_dir = make_plots_dir(n_init_arg, xi_arg)
+                    plot_results(all_results, save_dir=save_dir)
+
+            # Store results for sweep summary
             all_sweep_results[sweep_key] = all_results
-
-            # Print summary for this combination
-            print_summary(all_results, n_repetitions)
-
-            # Plot results for this combination
-            if save_plots:
-                print("\n" + "=" * 70)
-                print(f"Generating plots for n_init={n_initial}, xi={xi}...")
-                print("=" * 70)
-                n_init_arg = n_initial if len(n_initial_values) > 1 else None
-                xi_arg = xi if len(xi_values) > 1 else None
-                save_dir = make_plots_dir(n_init_arg, xi_arg)
-                plot_results(all_results, save_dir=save_dir)
 
     # Print combined summary if sweeping over multiple values
     if len(n_initial_values) > 1 or len(xi_values) > 1:
