@@ -68,14 +68,13 @@ def main():
 
     slurm_script = f"""#!/bin/bash
 #SBATCH -J bo_sweep
-#SBATCH -o logs/bo_%A_%a.out
-#SBATCH -e logs/bo_%A_%a.err
+#SBATCH -o logs/bo_%j.out
+#SBATCH -e logs/bo_%j.err
 #SBATCH -p {args.queue}
 #SBATCH -N 1
-#SBATCH -n 1
+#SBATCH -n {args.max_concurrent}
 #SBATCH -t {args.runtime}
 #SBATCH -A {args.allocation}
-#SBATCH --array=0-{max_idx}%{args.max_concurrent}
 
 # cd to repo root (script lives at repo root)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -85,11 +84,9 @@ cd "$SCRIPT_DIR"
 eval "$(conda shell.bash hook)"
 conda activate {args.conda_env}
 
-# Read the command for this array task
-CMD=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" tacc_launcher_commands.txt)
-
-echo "Task $SLURM_ARRAY_TASK_ID: $CMD"
-eval "$CMD"
+# Launch all commands via pylauncher
+module load pylauncher
+python -c "import pylauncher; pylauncher.ClassicLauncher('tacc_launcher_commands.txt', cores=4)"
 """
 
     slurm_file = repo_root / 'tacc_launch.slurm'
@@ -102,9 +99,7 @@ eval "$CMD"
     print(f"Wall time per task: {args.runtime}")
 
     print(f"\nUsage:")
-    print(f"  Submit all:           sbatch tacc_launch.slurm")
-    print(f"  Submit subset:        sbatch --array=0-20 tacc_launch.slurm")
-    print(f"  Rerun failed tasks:   sbatch --array=5,12,99 tacc_launch.slurm")
+    print(f"  Submit:               sbatch tacc_launch.slurm")
     print(f"  Check status:         sacct -j <JOBID> --format=JobID,State,Elapsed")
     print(f"  After completion:     python tacc_gather_results.py")
     print(f"\nLocal parallel run:     parallel -j 8 < tacc_launcher_commands.txt")
