@@ -30,7 +30,7 @@ import time
 from typing import Optional, Tuple, Dict, Any, Literal, List, Callable
 from scipy.optimize import minimize, basinhopping
 from scipy.stats import norm
-from scipy.stats.qmc import LatinHypercube
+from scipy.stats.qmc import LatinHypercube, Sobol
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, WhiteKernel, RBF, Matern
 
@@ -327,16 +327,19 @@ def create_gp(
     Returns:
         Configured GaussianProcessRegressor
     """
+    # Lower length-scale bound of 0.01 prevents GP collapse to delta functions
+    # (memorisation mode) which produces constant mean predictions away from
+    # training points and kills acquisition-function guidance.
     if kernel_type.lower() == 'matern':
         kernel = (
             ConstantKernel(1.0, constant_value_bounds=(1e-5, 1e3)) *
-            Matern(length_scale=np.ones(n_dim), length_scale_bounds=(1e-5, 10.0), nu=2.5) +
+            Matern(length_scale=np.ones(n_dim), length_scale_bounds=(1e-2, 10.0), nu=2.5) +
             WhiteKernel(noise_level=noise_level, noise_level_bounds=(1e-10, 1e-1))
         )
     else:  # RBF
         kernel = (
-            ConstantKernel(1.0, constant_value_bounds=(1e-10, 1e3)) *
-            RBF(length_scale=np.ones(n_dim), length_scale_bounds=(1e-10, 10.0)) +
+            ConstantKernel(1.0, constant_value_bounds=(1e-5, 1e3)) *
+            RBF(length_scale=np.ones(n_dim), length_scale_bounds=(1e-2, 10.0)) +
             WhiteKernel(noise_level=noise_level, noise_level_bounds=(1e-10, 1e-1))
         )
 
@@ -344,7 +347,7 @@ def create_gp(
         kernel=kernel,
         alpha=1e-6,
         normalize_y=True,
-        n_restarts_optimizer=5
+        n_restarts_optimizer=10
     )
 
 
@@ -355,16 +358,102 @@ def _normalize_inputs(X: np.ndarray, x_lower: np.ndarray, x_upper: np.ndarray) -
     return (X - x_lower) / ranges
 
 
-def _adaptive_penalty(Y_feasible: np.ndarray, sign: float) -> float:
-    """Compute an adaptive penalty based on observed objective range.
+def _optimize_acquisition(
+    acq_func: Callable,
+    gpr: GaussianProcessRegressor,
+    y_best: float,
+    n_dim: int,
+    rng: np.random.Generator,
+    n_sobol: int = 4096,
+    n_local_starts: int = 5,
+    refine: bool = False,
+) -> np.ndarray:
+    """Maximize acquisition function over [0,1]^n_dim using Sobol + L-BFGS-B.
 
-    Returns a penalty large enough to discourage infeasible points
-    but small enough not to destroy the GP surrogate.
+    1. Evaluate acquisition on a Sobol quasi-random grid (better space-filling
+       than uniform random, especially in low dimensions).
+    2. Refine the top candidates with L-BFGS-B (bounded) using numerical
+       gradients of the acquisition surface.
+
+    Args:
+        acq_func: Callable (X, gpr, y_best) -> values, shape (n_points,)
+        gpr: Fitted GP regressor
+        y_best: Best observed (GP-space) value
+        n_dim: Dimensionality of the search space
+        rng: Random number generator
+        n_sobol: Number of Sobol points (rounded up to next power of 2)
+        n_local_starts: Number of L-BFGS-B restarts from best Sobol points
+
+    Returns:
+        Best point in [0,1]^n_dim
+    """
+    # Round n_sobol up to next power of 2 (required by Sobol)
+    m = int(np.ceil(np.log2(max(n_sobol, 2))))
+    n_sobol_actual = 2 ** m
+
+    # Sobol quasi-random grid — scrambled for stochastic tie-breaking
+    sobol_engine = Sobol(d=n_dim, scramble=True, seed=int(rng.integers(0, 2**31)))
+    X_sobol = sobol_engine.random(n_sobol_actual)  # shape (n_sobol_actual, n_dim)
+
+    acq_values = acq_func(X_sobol, gpr, y_best)
+    top_indices = np.argsort(acq_values)[-n_local_starts:]
+
+    best_x = X_sobol[top_indices[-1]]
+    best_val = acq_values[top_indices[-1]]
+
+    if not refine:
+        return best_x
+
+    # L-BFGS-B refinement from each top candidate
+    bounds_01 = [(0.0, 1.0)] * n_dim
+    for idx in top_indices:
+        x0 = X_sobol[idx]
+        try:
+            res = minimize(
+                lambda x: -acq_func(x.reshape(1, -1), gpr, y_best).item(),
+                x0,
+                method='L-BFGS-B',
+                bounds=bounds_01,
+                options={'maxiter': 50, 'ftol': 1e-12},
+            )
+            if -res.fun > best_val:
+                best_val = -res.fun
+                best_x = res.x
+        except (np.linalg.LinAlgError, ValueError):
+            continue
+
+    return best_x
+
+
+def _adaptive_penalty_scale(Y_feasible: np.ndarray, sign: float) -> float:
+    """Compute an adaptive penalty scale based on observed objective range.
+
+    Returns a multiplier applied to max constraint violation, so that
+    barely-infeasible points get a small penalty and deeply-infeasible
+    points get a large one.  This keeps the GP surface smooth near the
+    feasibility boundary — critical for constrained problems where the
+    optimum often sits on or near that boundary.
     """
     if len(Y_feasible) == 0:
         return 10.0  # fallback before any feasible points seen
     y_range = np.ptp(Y_feasible)  # max - min of GP-space feasible values
     return max(10.0, 3.0 * y_range)
+
+
+def _constraint_penalty(g_val: np.ndarray, penalty_scale: float) -> float:
+    """Compute penalty proportional to constraint violation.
+
+    Args:
+        g_val: Constraint values (g <= 0 is feasible).
+        penalty_scale: Multiplier from _adaptive_penalty_scale.
+
+    Returns:
+        penalty_scale * max(0, max(g))  — zero when feasible.
+    """
+    if g_val is None or len(g_val) == 0:
+        return 0.0
+    max_viol = max(0.0, float(np.max(g_val)))
+    return penalty_scale * max_viol
 
 
 # =============================================================================
@@ -672,15 +761,10 @@ def solve_blackbox_bo(
     G_sample = []  # Constraint values
     Y_feasible_gp = []  # GP-space values for feasible points (for adaptive penalty)
 
-    def penalized_objective(J_val, g_val, current_penalty):
-        """Apply penalty if constraints violated."""
+    def penalized_objective(J_val, g_val, current_penalty_scale):
+        """Apply penalty proportional to constraint violation."""
         y = sign * J_val  # Convert to minimization for GP
-        if g_val is None or len(g_val) == 0:
-            return y
-        max_violation = np.max(g_val)
-        if max_violation > 0:
-            return y + current_penalty
-        return y
+        return y + _constraint_penalty(g_val, current_penalty_scale)
 
     if verbose:
         print(f"Black-box BO optimization of {problem.name}")
@@ -707,15 +791,14 @@ def solve_blackbox_bo(
         # Temporarily store un-penalized GP value; we'll compute penalties after
         Y_sample.append(y_gp)
 
-    # Compute adaptive penalty from initial feasible points and re-penalize
+    # Compute adaptive penalty scale from initial feasible points and re-penalize
     if use_adaptive_penalty:
-        penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
+        penalty = _adaptive_penalty_scale(np.array(Y_feasible_gp), sign)
     Y_sample_recomputed = []
     for i_init in range(len(X_sample)):
         g_val = G_sample[i_init]
         y_gp = sign * Y_true[i_init]
-        if has_constraints and len(g_val) > 0 and np.max(g_val) > 0:
-            y_gp += penalty
+        y_gp += _constraint_penalty(g_val, penalty)
         Y_sample_recomputed.append(y_gp)
 
     X_sample = np.array(X_sample)
@@ -752,7 +835,7 @@ def solve_blackbox_bo(
             if is_feas:
                 Y_feasible_gp.append(y_gp_next)
                 if use_adaptive_penalty:
-                    penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
+                    penalty = _adaptive_penalty_scale(np.array(Y_feasible_gp), sign)
             y_penalized = penalized_objective(J_next, g_next, penalty)
             X_sample = np.vstack([X_sample, x_next])
             Y_sample = np.append(Y_sample, y_penalized)
@@ -773,12 +856,11 @@ def solve_blackbox_bo(
             kappa=kappa
         )
 
-        # Grid search for next point in normalized space with error handling
+        # Sobol quasi-random acquisition optimization in normalized [0,1]^d
         try:
-            X_grid_norm = rng.uniform(0.0, 1.0, size=(1000, n_x))
-            acq_values = acq_func(X_grid_norm, gpr, np.min(Y_sample))
-            best_norm = X_grid_norm[np.argmax(acq_values)]
-            # Convert back to original space
+            best_norm = _optimize_acquisition(
+                acq_func, gpr, np.min(Y_sample), n_x, rng,
+            )
             x_next = x_lower + best_norm * (x_upper - x_lower)
         except (np.linalg.LinAlgError, ValueError) as e:
             if verbose:
@@ -793,7 +875,7 @@ def solve_blackbox_bo(
         if is_feas:
             Y_feasible_gp.append(y_gp_next)
             if use_adaptive_penalty:
-                penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
+                penalty = _adaptive_penalty_scale(np.array(Y_feasible_gp), sign)
         y_penalized = penalized_objective(J_next, g_next, penalty)
 
         # Update samples
@@ -988,14 +1070,14 @@ def solve_bilevel_bo(
         # Store un-penalized for now; penalties applied after initial loop
         Y_sample.append(y_gp)
 
-    # Compute adaptive penalty from initial feasible points and re-penalize
+    # Compute adaptive penalty scale from initial feasible points and re-penalize
     if use_adaptive_penalty:
-        penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
+        penalty = _adaptive_penalty_scale(np.array(Y_feasible_gp), sign)
     Y_sample_recomputed = []
     for i_init in range(len(X_bb_sample)):
         y_gp = sign * Y_true[i_init]
-        if not Feasible[i_init]:
-            y_gp += penalty
+        g_val = G_sample[i_init] if has_constraints else np.array([])
+        y_gp += _constraint_penalty(g_val, penalty)
         Y_sample_recomputed.append(y_gp)
 
     X_bb_sample = np.array(X_bb_sample)
@@ -1046,9 +1128,8 @@ def solve_bilevel_bo(
             if is_feas:
                 Y_feasible_gp.append(y_gp)
                 if use_adaptive_penalty:
-                    penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
-            if not is_feas:
-                y_gp += penalty
+                    penalty = _adaptive_penalty_scale(np.array(Y_feasible_gp), sign)
+            y_gp += _constraint_penalty(g_next, penalty)
             Y_sample = np.append(Y_sample, y_gp)
             iter_times.append(time.perf_counter() - iter_start)
             continue
@@ -1064,12 +1145,11 @@ def solve_bilevel_bo(
             kappa=kappa
         )
 
-        # Grid search for next point in normalized space with error handling
+        # Sobol quasi-random acquisition optimization in normalized [0,1]^d
         try:
-            X_bb_grid_norm = rng.uniform(0.0, 1.0, size=(1000, problem.n_x_bb))
-            acq_values = acq_func(X_bb_grid_norm, gpr, np.min(Y_sample))
-            best_norm = X_bb_grid_norm[np.argmax(acq_values)]
-            # Convert back to original space
+            best_norm = _optimize_acquisition(
+                acq_func, gpr, np.min(Y_sample), problem.n_x_bb, rng,
+            )
             x_bb_next = bb_lower + best_norm * (bb_upper - bb_lower)
         except (np.linalg.LinAlgError, ValueError) as e:
             if verbose:
@@ -1099,9 +1179,8 @@ def solve_bilevel_bo(
         if is_feas:
             Y_feasible_gp.append(y_gp)
             if use_adaptive_penalty:
-                penalty = _adaptive_penalty(np.array(Y_feasible_gp), sign)
-        if not is_feas:
-            y_gp += penalty
+                penalty = _adaptive_penalty_scale(np.array(Y_feasible_gp), sign)
+        y_gp += _constraint_penalty(g_next, penalty)
         Y_sample = np.append(Y_sample, y_gp)
 
         # Record iteration time
