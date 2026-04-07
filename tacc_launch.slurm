@@ -9,8 +9,7 @@
 #SBATCH -A DDM25011
 
 # cd to repo root (script lives at repo root)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "/work/08940/joshuaeh/ls6/projects/HybridBayesianOptimization"
 
 # Activate conda environment
 eval "$(conda shell.bash hook)"

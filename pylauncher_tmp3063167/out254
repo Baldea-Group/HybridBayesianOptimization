@@ -1,0 +1,4 @@
+Problem=Williams-Otto  n_init=5  xi=0.05  n_iter=200  n_reps=10  acq=ei
+  rep 1/10 (seed=42)
+  rep 2/10 (seed=43)
+  rep 3/10 (seed=44)

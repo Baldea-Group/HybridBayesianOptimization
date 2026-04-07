@@ -1,0 +1,32 @@
+Problem=PSA  n_init=50  xi=0.05  n_iter=200  n_reps=10  acq=ei
+  rep 1/10 (seed=42)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  rep 2/10 (seed=43)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  rep 3/10 (seed=44)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  rep 4/10 (seed=45)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  rep 5/10 (seed=46)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  rep 6/10 (seed=47)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  rep 7/10 (seed=48)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  rep 8/10 (seed=49)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  rep 9/10 (seed=50)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  rep 10/10 (seed=51)
+    DE error: array must not contain infs or NaNs
+    Bi-BO ei error: array must not contain infs or NaNs
+  Saved -> results_parallel/PSA_ninit50_xi0.05.pkl

@@ -1,0 +1,5 @@
+Problem=CSTR  n_init=25  xi=0.001  n_iter=200  n_reps=10  acq=ei
+  rep 1/10 (seed=42)
+  rep 2/10 (seed=43)
+  rep 3/10 (seed=44)
+  rep 4/10 (seed=45)
