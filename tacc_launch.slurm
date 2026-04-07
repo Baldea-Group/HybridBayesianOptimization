@@ -5,7 +5,7 @@
 #SBATCH -p normal
 #SBATCH -N 1
 #SBATCH -n 128
-#SBATCH -t 36:00:00
+#SBATCH -t 20:00:00
 #SBATCH -A DDM25011
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=joshua.hammond@utexas.edu
@@ -20,4 +20,4 @@ conda activate bo
 
 # Launch all commands via pylauncher
 module load pylauncher
-python -c "import pylauncher; pylauncher.ClassicLauncher('tacc_launcher_commands.txt', cores=4)"
+python -c "import pylauncher; pylauncher.ClassicLauncher('tacc_launcher_commands.txt', cores=1)"
