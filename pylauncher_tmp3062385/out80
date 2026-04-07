@@ -1,2 +1,0 @@
-Problem=Toy-Hydrology  n_init=50  xi=0.1  n_iter=200  n_reps=10  acq=ei
-  rep 1/10 (seed=42)
