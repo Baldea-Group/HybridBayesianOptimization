@@ -8,12 +8,9 @@ build/
 *.egg
 
 # Results and generated plots
-results/
-results_parallel/
 plots*/
 
 # Generated TACC files
-tacc_launcher_commands.txt
 logs/
 
 # Literature (reference PDFs)
@@ -50,6 +47,3 @@ Thumbs.db
 # Claude Code
 .claude/
 CLAUDE.md
-
-# Misc
-*.pkl
