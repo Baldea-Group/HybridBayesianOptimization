@@ -57,8 +57,8 @@ def compute_grid_layout(n_items: int, n_rows: int = DEFAULT_NROWS) -> tuple:
 METHOD_COLORS = {
     'blackbox_bo': '#0173B2',   # blue
     'bilevel_bo': '#D55E00',    # vermillion/orange-red
-    'nlp': '#949494',           # gray
-    'global_de': '#029E73',     # green
+    'multistart_slsqp': '#949494',           # gray
+    'basin_hopping': '#029E73',     # green
 }
 
 
@@ -76,18 +76,18 @@ def print_summary(all_results: Dict[str, Any], n_repetitions: int):
         print(f"Problem: {name} (J* = {J_opt:.4f})")
         print("=" * 100)
 
-        # NLP result (independent of acquisition)
-        nlp_Js = np.array(res['blackbox_nlp']['best_Js'])
-        nlp_regrets = np.array(res['blackbox_nlp']['final_regrets'])
-        print(f"\nBlack-box NLP:")
+        # SLSQP result (independent of acquisition)
+        nlp_Js = np.array(res['multistart_slsqp']['best_Js'])
+        nlp_regrets = np.array(res['multistart_slsqp']['final_regrets'])
+        print(f"\nMultistart SLSQP:")
         print(f"  Best J: {np.mean(nlp_Js):.4f} +/- {np.std(nlp_Js):.4f}")
         print(f"  Regret: {np.mean(nlp_regrets):.4f} +/- {np.std(nlp_regrets):.4f}")
 
         # Global DE result (independent of acquisition)
-        if 'global_de' in res and len(res['global_de'].get('best_Js', [])) > 0:
-            de_Js = np.array(res['global_de']['best_Js'])
-            de_regrets = np.array(res['global_de']['final_regrets'])
-            de_evals = np.array(res['global_de']['n_fbb_evals'])
+        if 'basin_hopping' in res and len(res['basin_hopping'].get('best_Js', [])) > 0:
+            de_Js = np.array(res['basin_hopping']['best_Js'])
+            de_regrets = np.array(res['basin_hopping']['final_regrets'])
+            de_evals = np.array(res['basin_hopping']['n_fbb_evals'])
             print(f"\nGlobal DE:")
             print(f"  Best J: {np.mean(de_Js):.4f} +/- {np.std(de_Js):.4f}")
             print(f"  Regret (at BO budget): {np.mean(de_regrets):.4f} +/- {np.std(de_regrets):.4f}")
@@ -131,8 +131,8 @@ def print_summary(all_results: Dict[str, Any], n_repetitions: int):
 
         # Global DE regret
         de_str = "N/A"
-        if 'global_de' in res and len(res['global_de'].get('final_regrets', [])) > 0:
-            de_regret = np.mean(res['global_de']['final_regrets'])
+        if 'basin_hopping' in res and len(res['basin_hopping'].get('final_regrets', [])) > 0:
+            de_regret = np.mean(res['basin_hopping']['final_regrets'])
             de_str = f"{de_regret:.4f}"
 
         # Find best BB-BO
@@ -240,8 +240,8 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
                                    mean_regret + ci, color=METHOD_COLORS['bilevel_bo'], alpha=0.15)
 
             # Global DE regret curve
-            if 'global_de' in res and len(res['global_de'].get('regrets', [])) > 0:
-                de_regrets_list = res['global_de']['regrets']
+            if 'basin_hopping' in res and len(res['basin_hopping'].get('regrets', [])) > 0:
+                de_regrets_list = res['basin_hopping']['regrets']
                 valid_de = [r for r in de_regrets_list if not np.all(np.isinf(r))]
                 if len(valid_de) > 0:
                     min_len = min(len(r) for r in valid_de)
@@ -255,19 +255,19 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
                         all_y_values.extend(valid_y)
 
                     iters = range(1, min_len + 1)
-                    ax.plot(iters, mean_regret, color=METHOD_COLORS['global_de'],
+                    ax.plot(iters, mean_regret, color=METHOD_COLORS['basin_hopping'],
                            linestyle='-', label='Global DE', linewidth=2)
                     ax.fill_between(iters, np.maximum(mean_regret - ci, 1e-10),
-                                   mean_regret + ci, color=METHOD_COLORS['global_de'], alpha=0.15)
+                                   mean_regret + ci, color=METHOD_COLORS['basin_hopping'], alpha=0.15)
 
-            # Add NLP reference line
-            if 'final_regrets' in res['blackbox_nlp']:
-                regrets_nlp = np.array(res['blackbox_nlp']['final_regrets'])
+            # Add SLSQP reference line
+            if 'final_regrets' in res['multistart_slsqp']:
+                regrets_nlp = np.array(res['multistart_slsqp']['final_regrets'])
                 mean_nlp = np.mean(regrets_nlp)
                 if mean_nlp > 0:
                     all_y_values.append(mean_nlp)
-                ax.axhline(y=mean_nlp, color=METHOD_COLORS['nlp'], linestyle=':',
-                          label=f'NLP ({mean_nlp:.4f})', linewidth=1.5, alpha=0.7)
+                ax.axhline(y=mean_nlp, color=METHOD_COLORS['multistart_slsqp'], linestyle=':',
+                          label=f'SLSQP ({mean_nlp:.4f})', linewidth=1.5, alpha=0.7)
 
             # Set axis limits (filter out inf/nan)
             finite_y = [v for v in all_y_values if np.isfinite(v) and v > 0]
@@ -367,8 +367,8 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
                                           mean_regret + ci, color=color, alpha=0.15)
 
             # Add Global DE reference curve to both
-            if 'global_de' in res and len(res['global_de'].get('regrets', [])) > 0:
-                valid_de = [r for r in res['global_de']['regrets'] if not np.all(np.isinf(r))]
+            if 'basin_hopping' in res and len(res['basin_hopping'].get('regrets', [])) > 0:
+                valid_de = [r for r in res['basin_hopping']['regrets'] if not np.all(np.isinf(r))]
                 if len(valid_de) > 0:
                     min_len = min(len(r) for r in valid_de)
                     de_regrets = np.array([r[:min_len] for r in valid_de])
@@ -378,18 +378,18 @@ def plot_regret_vs_iteration(all_results: Dict[str, Any], save_dir: Optional[Pat
                         all_y_values.extend(valid_y)
                     de_iters = range(1, min_len + 1)
                     for ax in [ax_bb, ax_bi]:
-                        ax.plot(de_iters, mean_de, color=METHOD_COLORS['global_de'],
+                        ax.plot(de_iters, mean_de, color=METHOD_COLORS['basin_hopping'],
                                 linestyle='--', label='Global DE', linewidth=1.5, alpha=0.8)
 
-            # Add NLP reference line to both
-            if 'final_regrets' in res['blackbox_nlp']:
-                regrets_nlp = np.array(res['blackbox_nlp']['final_regrets'])
+            # Add SLSQP reference line to both
+            if 'final_regrets' in res['multistart_slsqp']:
+                regrets_nlp = np.array(res['multistart_slsqp']['final_regrets'])
                 mean_nlp = np.mean(regrets_nlp)
                 if mean_nlp > 0:
                     all_y_values.append(mean_nlp)
                 for ax in [ax_bb, ax_bi]:
                     ax.axhline(y=mean_nlp, color='black', linestyle=':',
-                              label=f'NLP ({mean_nlp:.4f})', linewidth=1.5, alpha=0.7)
+                              label=f'SLSQP ({mean_nlp:.4f})', linewidth=1.5, alpha=0.7)
 
             # Set shared y-axis limits for top and bottom plots (filter inf/nan)
             finite_y = [v for v in all_y_values if np.isfinite(v) and v > 0]
@@ -475,16 +475,16 @@ def plot_final_regret_bars(all_results: Dict[str, Any], save_dir: Optional[Path]
         ax.bar(x + width/2, bi_means, width, yerr=bi_stds,
                label='Bi-level BO', color=METHOD_COLORS['bilevel_bo'], alpha=0.8, capsize=3)
 
-        # Add NLP reference
-        if 'final_regrets' in res['blackbox_nlp']:
-            mean_nlp = np.mean(res['blackbox_nlp']['final_regrets'])
-            ax.axhline(y=mean_nlp, color=METHOD_COLORS['nlp'], linestyle='--',
-                      label=f'NLP ({mean_nlp:.4f})', linewidth=2)
+        # Add SLSQP reference
+        if 'final_regrets' in res['multistart_slsqp']:
+            mean_nlp = np.mean(res['multistart_slsqp']['final_regrets'])
+            ax.axhline(y=mean_nlp, color=METHOD_COLORS['multistart_slsqp'], linestyle='--',
+                      label=f'SLSQP ({mean_nlp:.4f})', linewidth=2)
 
         # Add Global DE reference
-        if 'global_de' in res and len(res['global_de'].get('final_regrets', [])) > 0:
-            mean_de = np.mean(res['global_de']['final_regrets'])
-            ax.axhline(y=mean_de, color=METHOD_COLORS['global_de'], linestyle='--',
+        if 'basin_hopping' in res and len(res['basin_hopping'].get('final_regrets', [])) > 0:
+            mean_de = np.mean(res['basin_hopping']['final_regrets'])
+            ax.axhline(y=mean_de, color=METHOD_COLORS['basin_hopping'], linestyle='--',
                       label=f'Global DE ({mean_de:.4f})', linewidth=2)
 
         ax.set_xlabel('Acquisition Function')
@@ -530,12 +530,12 @@ def plot_method_comparison(all_results: Dict[str, Any], save_dir: Optional[Path]
         res = all_results[name]
         acquisitions = res.get('acquisitions', ['ei'])
 
-        # NLP
-        nlp_regrets.append(np.mean(res['blackbox_nlp']['final_regrets']))
+        # SLSQP
+        nlp_regrets.append(np.mean(res['multistart_slsqp']['final_regrets']))
 
         # Global DE
-        if 'global_de' in res and len(res['global_de'].get('final_regrets', [])) > 0:
-            de_regrets.append(np.mean(res['global_de']['final_regrets']))
+        if 'basin_hopping' in res and len(res['basin_hopping'].get('final_regrets', [])) > 0:
+            de_regrets.append(np.mean(res['basin_hopping']['final_regrets']))
         else:
             de_regrets.append(np.inf)
 
@@ -565,10 +565,10 @@ def plot_method_comparison(all_results: Dict[str, Any], save_dir: Optional[Path]
         best_bi_regrets.append(best_bi)
         best_bi_acqs.append(best_bi_acq)
 
-    bars1 = ax.bar(x - 1.5*width, nlp_regrets, width, label='NLP',
-                   color=METHOD_COLORS['nlp'], alpha=0.7)
+    bars1 = ax.bar(x - 1.5*width, nlp_regrets, width, label='SLSQP',
+                   color=METHOD_COLORS['multistart_slsqp'], alpha=0.7)
     bars_de = ax.bar(x - 0.5*width, de_regrets, width, label='Global DE',
-                     color=METHOD_COLORS['global_de'], alpha=0.7)
+                     color=METHOD_COLORS['basin_hopping'], alpha=0.7)
     bars2 = ax.bar(x + 0.5*width, best_bb_regrets, width, label='Best BB-BO',
                    color=METHOD_COLORS['blackbox_bo'], alpha=0.7)
     bars3 = ax.bar(x + 1.5*width, best_bi_regrets, width, label='Best Bi-level',
@@ -647,16 +647,16 @@ def plot_wall_time(all_results: Dict[str, Any], save_dir: Optional[Path] = None)
         ax.bar(x + width/2, bi_means, width, yerr=bi_stds,
                label='Bi-level BO', color=METHOD_COLORS['bilevel_bo'], alpha=0.8, capsize=3)
 
-        # Add NLP reference line
-        if 'wall_times' in res['blackbox_nlp'] and len(res['blackbox_nlp']['wall_times']) > 0:
-            mean_nlp = np.mean(res['blackbox_nlp']['wall_times'])
-            ax.axhline(y=mean_nlp, color=METHOD_COLORS['nlp'], linestyle='--',
-                      label=f'NLP ({mean_nlp:.2f}s)', linewidth=2)
+        # Add SLSQP reference line
+        if 'wall_times' in res['multistart_slsqp'] and len(res['multistart_slsqp']['wall_times']) > 0:
+            mean_nlp = np.mean(res['multistart_slsqp']['wall_times'])
+            ax.axhline(y=mean_nlp, color=METHOD_COLORS['multistart_slsqp'], linestyle='--',
+                      label=f'SLSQP ({mean_nlp:.2f}s)', linewidth=2)
 
         # Add Global DE reference line
-        if 'global_de' in res and len(res['global_de'].get('wall_times', [])) > 0:
-            mean_de = np.mean(res['global_de']['wall_times'])
-            ax.axhline(y=mean_de, color=METHOD_COLORS['global_de'], linestyle='--',
+        if 'basin_hopping' in res and len(res['basin_hopping'].get('wall_times', [])) > 0:
+            mean_de = np.mean(res['basin_hopping']['wall_times'])
+            ax.axhline(y=mean_de, color=METHOD_COLORS['basin_hopping'], linestyle='--',
                       label=f'Global DE ({mean_de:.2f}s)', linewidth=2)
 
         ax.set_xlabel('Acquisition Function')

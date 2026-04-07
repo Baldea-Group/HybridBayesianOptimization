@@ -34,8 +34,8 @@ from utils import plots_dir as make_plots_dir
 
 from functions import BiLevelProblem, get_all_problems, get_cobalt_problems
 from solvers import (
-    solve_blackbox_nlp,
-    solve_global_de,
+    solve_multistart_slsqp,
+    solve_basin_hopping,
     solve_blackbox_bo,
     solve_bilevel_bo,
     compute_regret,
@@ -100,8 +100,8 @@ def run_experiments(
             'J_optimal': problem.J_optimal,
             'maximize': problem.maximize,
             'acquisitions': acquisitions,
-            'blackbox_nlp': {'final_regrets': [], 'best_Js': [], 'n_fbb_evals': [], 'wall_times': []},
-            'global_de': {
+            'multistart_slsqp': {'final_regrets': [], 'best_Js': [], 'n_fbb_evals': [], 'wall_times': []},
+            'basin_hopping': {
                 'regrets': [], 'final_regrets': [], 'best_Js': [],
                 'n_fbb_evals': [], 'wall_times': [],
                 'X_history': [], 'Y_history': []
@@ -128,7 +128,7 @@ def run_experiments(
             if verbose:
                 print("    [NLP] Black-box NLP...")
             t0 = time.perf_counter()
-            res_nlp = solve_blackbox_nlp(
+            res_nlp = solve_multistart_slsqp(
                 problem, n_starts=n_starts_nlp, seed=seed, verbose=False
             )
             t_nlp = time.perf_counter() - t0
@@ -138,19 +138,19 @@ def run_experiments(
             else:
                 regret_nlp = res_nlp['best_J'] - problem.J_optimal
 
-            results['blackbox_nlp']['final_regrets'].append(regret_nlp)
-            results['blackbox_nlp']['best_Js'].append(res_nlp['best_J'])
-            results['blackbox_nlp']['n_fbb_evals'].append(res_nlp['n_fbb_evals'])
-            results['blackbox_nlp']['wall_times'].append(t_nlp)
+            results['multistart_slsqp']['final_regrets'].append(regret_nlp)
+            results['multistart_slsqp']['best_Js'].append(res_nlp['best_J'])
+            results['multistart_slsqp']['n_fbb_evals'].append(res_nlp['n_fbb_evals'])
+            results['multistart_slsqp']['wall_times'].append(t_nlp)
             if verbose:
                 print(f"           best_J = {res_nlp['best_J']:.6f}, regret = {regret_nlp:.6f}, time = {t_nlp:.2f}s")
 
             # 2. Global DE (once per repetition, independent of acquisition)
             if verbose:
-                print("    [DE] Global Differential Evolution...")
+                print("    [BH] Basin-Hopping...")
             t0 = time.perf_counter()
             try:
-                res_de = solve_global_de(
+                res_de = solve_basin_hopping(
                     problem, seed=seed, verbose=False, return_history=True
                 )
                 t_de = time.perf_counter() - t0
@@ -167,13 +167,13 @@ def run_experiments(
                 else:
                     fair_regret = regret_de[-1]
 
-                results['global_de']['regrets'].append(regret_de)
-                results['global_de']['final_regrets'].append(fair_regret)
-                results['global_de']['best_Js'].append(res_de['best_J'])
-                results['global_de']['n_fbb_evals'].append(res_de['n_fbb_evals'])
-                results['global_de']['wall_times'].append(t_de)
-                results['global_de']['X_history'].append(res_de.get('X_history', np.array([])))
-                results['global_de']['Y_history'].append(res_de.get('Y_history', np.array([])))
+                results['basin_hopping']['regrets'].append(regret_de)
+                results['basin_hopping']['final_regrets'].append(fair_regret)
+                results['basin_hopping']['best_Js'].append(res_de['best_J'])
+                results['basin_hopping']['n_fbb_evals'].append(res_de['n_fbb_evals'])
+                results['basin_hopping']['wall_times'].append(t_de)
+                results['basin_hopping']['X_history'].append(res_de.get('X_history', np.array([])))
+                results['basin_hopping']['Y_history'].append(res_de.get('Y_history', np.array([])))
 
                 if verbose:
                     print(f"           best_J = {res_de['best_J']:.6f}, regret@budget = {fair_regret:.6f}, "
@@ -182,13 +182,13 @@ def run_experiments(
                 t_de = time.perf_counter() - t0
                 if verbose:
                     print(f"           ERROR: {type(e).__name__}: {e}")
-                results['global_de']['regrets'].append(np.array([np.inf]))
-                results['global_de']['final_regrets'].append(np.inf)
-                results['global_de']['best_Js'].append(np.inf if not problem.maximize else -np.inf)
-                results['global_de']['n_fbb_evals'].append(0)
-                results['global_de']['wall_times'].append(t_de)
-                results['global_de']['X_history'].append(np.array([]))
-                results['global_de']['Y_history'].append(np.array([]))
+                results['basin_hopping']['regrets'].append(np.array([np.inf]))
+                results['basin_hopping']['final_regrets'].append(np.inf)
+                results['basin_hopping']['best_Js'].append(np.inf if not problem.maximize else -np.inf)
+                results['basin_hopping']['n_fbb_evals'].append(0)
+                results['basin_hopping']['wall_times'].append(t_de)
+                results['basin_hopping']['X_history'].append(np.array([]))
+                results['basin_hopping']['Y_history'].append(np.array([]))
 
             # 3. Run BO methods for each acquisition function
             for acq_idx, acq in enumerate(acquisitions):
@@ -295,10 +295,10 @@ def _load_cached_results(filepath, settings, acquisitions, n_repetitions):
             print(f"Found results but missing problem {name}. Re-running...")
             return None
         res = saved_results[name]
-        if len(res['blackbox_nlp']['final_regrets']) < n_repetitions:
+        if len(res['multistart_slsqp']['final_regrets']) < n_repetitions:
             print(f"Found results but {name} incomplete. Re-running...")
             return None
-        de_res = res.get('global_de', {})
+        de_res = res.get('basin_hopping', {})
         if len(de_res.get('final_regrets', [])) < n_repetitions:
             print(f"Found results but {name} DE incomplete. Re-running...")
             return None

@@ -46,13 +46,15 @@ def main():
     for problem in PROBLEMS:
         for n_init in N_INIT_VALUES:
             for xi in XI_VALUES:
-                cmd = (f"python -u run_single_job.py "
-                       f"--problem {problem} "
-                       f"--n_init {n_init} --xi {xi} "
-                       f"--n_iter {args.n_iter} --n_reps {args.n_reps} "
-                       f"--acq {args.acq} --inner_solver {args.inner_solver} "
-                       f"--outdir {args.outdir}")
-                commands.append(cmd)
+                for rep in range(args.n_reps):
+                    cmd = (f"python -u run_single_job.py "
+                           f"--problem {problem} "
+                           f"--n_init {n_init} --xi {xi} "
+                           f"--rep {rep} "
+                           f"--n_iter {args.n_iter} "
+                           f"--acq {args.acq} --inner_solver {args.inner_solver} "
+                           f"--outdir {args.outdir}")
+                    commands.append(cmd)
 
     cmd_file = repo_root / 'tacc_launcher_commands.txt'
     with open(cmd_file, 'w') as f:

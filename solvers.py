@@ -3,9 +3,9 @@ solvers.py - Optimization solvers for bi-level problems
 
 This module implements three optimization approaches:
 
-1. Black-box NLP (solve_blackbox_nlp):
+1. Multi-start SLSQP (solve_multistart_slsqp):
    - Multi-start gradient-based optimization over all variables
-   - Uses scipy.optimize.minimize with SLSQP or L-BFGS-B
+   - Uses scipy.optimize.minimize with SLSQP
 
 2. Black-box BO (solve_blackbox_bo):
    - Bayesian Optimization over all variables [x^{WB}, x^{BB}]
@@ -457,10 +457,10 @@ def _constraint_penalty(g_val: np.ndarray, penalty_scale: float) -> float:
 
 
 # =============================================================================
-# Solver 1: Black-box NLP
+# Solver 1: Multi-start SLSQP
 # =============================================================================
 
-def solve_blackbox_nlp(
+def solve_multistart_slsqp(
     problem: BiLevelProblem,
     n_starts: int = 20,
     method: str = 'SLSQP',
@@ -509,7 +509,7 @@ def solve_blackbox_nlp(
     best_res = None
 
     if verbose:
-        print(f"Black-box NLP optimization of {problem.name}")
+        print(f"Multi-start SLSQP optimization of {problem.name}")
         print(f"  Running {n_starts} multi-start optimizations...")
 
     for i in range(n_starts):
@@ -552,7 +552,7 @@ def solve_blackbox_nlp(
 
 
 # =============================================================================
-# Solver 2: Global Differential Evolution
+# Solver 2: Basin-Hopping
 # =============================================================================
 
 class _BoundedStep:
@@ -589,7 +589,7 @@ class _HistoryCallback:
         return False  # never stop early
 
 
-def solve_global_de(
+def solve_basin_hopping(
     problem: BiLevelProblem,
     seed: int = 42,
     verbose: bool = True,
@@ -1332,9 +1332,9 @@ if __name__ == "__main__":
     print(f"  Optimal: J* = {problem.J_optimal}")
     print("-" * 70)
 
-    # Test NLP
-    print("\n1. Black-box NLP:")
-    res_nlp = solve_blackbox_nlp(problem, n_starts=10, verbose=True)
+    # Test multi-start SLSQP
+    print("\n1. Multi-start SLSQP:")
+    res_nlp = solve_multistart_slsqp(problem, n_starts=10, verbose=True)
 
     # Test BB-BO
     print("\n2. Black-box BO:")
