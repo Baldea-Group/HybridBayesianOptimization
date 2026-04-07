@@ -5,8 +5,10 @@
 #SBATCH -p normal
 #SBATCH -N 1
 #SBATCH -n 128
-#SBATCH -t 02:00:00
-#SBATCH -A MYALLOCATION
+#SBATCH -t 36:00:00
+#SBATCH -A DDM25011
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=joshua.hammond@utexas.edu
 
 # cd to repo root (script lives at repo root)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
