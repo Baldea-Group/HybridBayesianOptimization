@@ -1,11 +1,10 @@
 """
-tacc_generate_launcher_commands.py - Generate SLURM job array for TACC Lonestar6.
+tacc_generate_launcher_commands.py - Generate pylauncher command file for TACC.
 
 Creates:
-  - tacc_launcher_commands.txt  : one command per line, indexed by SLURM_ARRAY_TASK_ID
-  - tacc_launch.slurm           : SLURM job array script for Lonestar6
+  - tacc_launcher_commands.txt  : one command per line for pylauncher
 
-All paths are relative to the repository root.
+The SLURM script (tacc_launch.slurm) is maintained separately.
 """
 
 import argparse
@@ -29,14 +28,6 @@ def main():
     parser.add_argument('--n_reps', type=int, default=10)
     parser.add_argument('--acq', type=str, default='ei')
     parser.add_argument('--outdir', type=str, default='results_parallel')
-    parser.add_argument('--conda_env', type=str, default='bo')
-    parser.add_argument('--allocation', type=str, default='MYALLOCATION',
-                        help='TACC allocation name')
-    parser.add_argument('--queue', type=str, default='normal')
-    parser.add_argument('--runtime', type=str, default='02:00:00',
-                        help='Wall time per task')
-    parser.add_argument('--max_concurrent', type=int, default=128,
-                        help='Max simultaneous array tasks')
     args = parser.parse_args()
 
     repo_root = Path(__file__).parent
@@ -60,50 +51,13 @@ def main():
         f.write('\n'.join(commands) + '\n')
     print(f"Wrote {len(commands)} commands to {cmd_file}")
 
-    # Create output directories
+    # Create output directory
     (repo_root / args.outdir).mkdir(parents=True, exist_ok=True)
-    (repo_root / 'logs').mkdir(exist_ok=True)
 
-    n_tasks = len(commands)
-    max_idx = n_tasks - 1
-
-    slurm_script = f"""#!/bin/bash
-#SBATCH -J bo_sweep
-#SBATCH -o logs/bo_%j.out
-#SBATCH -e logs/bo_%j.err
-#SBATCH -p {args.queue}
-#SBATCH -N 1
-#SBATCH -n {args.max_concurrent}
-#SBATCH -t {args.runtime}
-#SBATCH -A {args.allocation}
-
-# cd to repo root (script lives at repo root)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
-
-# Activate conda environment
-eval "$(conda shell.bash hook)"
-conda activate {args.conda_env}
-
-# Launch all commands via pylauncher
-module load pylauncher
-python -c "import pylauncher; pylauncher.ClassicLauncher('tacc_launcher_commands.txt', cores=4)"
-"""
-
-    slurm_file = repo_root / 'tacc_launch.slurm'
-    with open(slurm_file, 'w') as f:
-        f.write(slurm_script)
-    print(f"Wrote SLURM script to {slurm_file}")
-
-    print(f"\nTotal tasks: {n_tasks}")
-    print(f"Array range: 0-{max_idx}%{args.max_concurrent}")
-    print(f"Wall time per task: {args.runtime}")
-
+    print(f"\nTotal tasks: {len(commands)}")
     print(f"\nUsage:")
     print(f"  Submit:               sbatch tacc_launch.slurm")
-    print(f"  Check status:         sacct -j <JOBID> --format=JobID,State,Elapsed")
-    print(f"  After completion:     python tacc_gather_results.py")
-    print(f"\nLocal parallel run:     parallel -j 8 < tacc_launcher_commands.txt")
+    print(f"  Local parallel run:   parallel -j 8 < tacc_launcher_commands.txt")
 
 
 if __name__ == '__main__':
