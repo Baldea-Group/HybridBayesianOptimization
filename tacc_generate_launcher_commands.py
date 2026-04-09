@@ -28,7 +28,6 @@ def main():
     parser.add_argument('--n_iter', type=int, default=200)
     parser.add_argument('--n_reps', type=int, default=10)
     parser.add_argument('--acq', type=str, default='ei')
-    parser.add_argument('--inner_solver', type=str, default='global')
     parser.add_argument('--outdir', type=str, default='results_parallel')
     parser.add_argument('--conda_env', type=str, default='bo')
     parser.add_argument('--allocation', type=str, default='MYALLOCATION',
@@ -52,7 +51,7 @@ def main():
                            f"--n_init {n_init} --xi {xi} "
                            f"--rep {rep} "
                            f"--n_iter {args.n_iter} "
-                           f"--acq {args.acq} --inner_solver {args.inner_solver} "
+                           f"--acq {args.acq} "
                            f"--outdir {args.outdir}")
                     commands.append(cmd)
 
