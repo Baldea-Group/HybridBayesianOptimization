@@ -8,16 +8,16 @@ build/
 *.egg
 
 # Results and generated plots
-python/plots*/
+plots*/
 
 # Generated TACC files
-python/logs/
+logs/
 
 # Literature (reference PDFs)
-python/Literature/
+Literature/
 
 # Presentations
-python/Presentations/
+Presentations/
 
 # LaTeX build artifacts
 *.aux
@@ -46,4 +46,4 @@ Thumbs.db
 
 # Claude Code
 .claude/
-python/CLAUDE.md
+CLAUDE.md

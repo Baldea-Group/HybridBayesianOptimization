@@ -1,107 +1,52 @@
-# Multi-Scale Bayesian Optimization
+# Hybrid Bayesian Optimization for Multiscale Process-Material Co-Design
 
-A framework for simultaneous process and material co-design using bi-level Bayesian optimization. Instead of running BO over all variables (curse of dimensionality), this approach uses BO only for black-box material variables while solving the process-level optimization exactly via NLP.
+A bi-level Bayesian optimization framework for simultaneous process and material co-design. Instead of running BO over all variables (curse of dimensionality), the framework uses BO only for black-box material/catalyst variables while solving the process-level optimization exactly via NLP or local solvers.
 
-## Setup
-
-Requires Python >= 3.9.
-
-```bash
-conda activate bo
-pip install -r requirements.txt
-```
-
-Dependencies: NumPy, SciPy (>= 1.7 for `scipy.stats.qmc`), scikit-learn, Matplotlib.
-
-## Quick Start
-
-```bash
-# Run full comparison on all benchmark problems
-python run_comparison.py --problems all --acq ei --n_iter 50 --n_reps 5
-
-# Run a single problem
-python run_comparison.py --problems cobalt --n_iter 100 --n_init 12
-
-# Sweep over hyperparameters
-python run_comparison.py --acq ei --n_init_sweep 1 5 20 50 --n_iter 200 --n_reps 10 \
-    --xi_sweep 0.001 0.01 0.05 0.1 0.2 0.5 1.0
-
-# Validate test problems
-python functions.py
-```
+**Key idea:** When grey-box problems have separable black-box and white-box variables -- natural in multi-scale process-material co-design -- embedding an exact solver inside the BO loop reduces surrogate dimensionality, satisfies constraints exactly, and achieves orders-of-magnitude better solutions.
 
 ## Repository Structure
 
 ```
 .
-├── functions.py          # BiLevelProblem dataclass and 13 test problems
-├── solvers.py            # Solvers: NLP, DE, black-box BO, bi-level BO
-├── run_comparison.py     # Experiment runner with results caching
-├── run_single_job.py     # Single-job runner for TACC parallel execution
-├── plotting.py           # Plotting functions (regret, timing, comparisons)
-├── utils.py              # Shared paths and utility functions
-│
-├── tacc_launch.slurm                 # SLURM submission script for TACC
-├── tacc_generate_launcher_commands.py # Generate SLURM job array commands
-├── tacc_gather_results.py            # Merge parallel job results
-│
-├── Report/               # LaTeX manuscript and report figures
-│   ├── main.tex
-│   ├── figs/             # Publication figures (EPS/PDF)
-│   └── generate_sfr_figures.py
-├── Notebooks/            # Jupyter notebooks for exploration
-├── figures/              # Quick-reference regret plots (PNG)
-├── _MATLAB/              # Legacy MATLAB implementations
-├── _archive/             # Archived results
-└── presentation.mplstyle # Matplotlib style for presentations
+|-- matlab/     # MATLAB implementation (CSTR case study)
+|-- python/     # Python benchmark suite (13 problems, extended framework)
 ```
 
-## Method
+### `matlab/`
 
-**Bi-level structure:**
+Original MATLAB implementation for a continuous stirred-tank reactor (CSTR) with consecutive reactions. Compares full 5D Bayesian optimization against the hybrid (bi-level) approach. See [matlab/README.md](matlab/README.md) for details.
 
-- **Outer loop** (BO over x_bb): `min J(x_wb*, pi)` where `pi = f_bb(x_bb)`
-- **Inner loop** (NLP over x_wb): `x_wb* = argmin { J(x_wb, pi) | g(x_wb) <= 0 }`
+### `python/`
 
-The black-box function `f_bb` maps material variables to intermediate parameters. The white-box objective `J` and constraints `g` are solved exactly by an NLP solver at each BO iteration.
+Extended Python implementation with a 13-problem benchmark suite, multiple acquisition functions (EI, PI, LCB, mWB2, Thompson), and comprehensive experimental infrastructure including TACC parallel execution. See [python/README.md](python/README.md) for details.
 
-## Benchmark Problems
+## Citations
 
-| Problem              | Dims (x_wb + x_bb) | Constraints | Type |
-|----------------------|---------------------|-------------|------|
-| Rastrigin            | 2 + 1               | 0           | min  |
-| Rosen-Suzuki         | 2 + 2               | 3           | min  |
-| Toy-Hydrology        | 1 + 1               | 2           | min  |
-| CSTR                 | 3 + 2               | 3           | max  |
-| Heat-Exchanger       | 2 + 1               | 2           | min  |
-| PSA                  | 2 + 1               | 1           | min  |
-| Batch-Reactor        | 2 + 1               | 1           | min  |
-| Distillation         | 3 + 1               | 3           | min  |
-| Evaporator           | 3 + 1               | 2           | min  |
-| Membrane             | 2 + 1               | 2           | min  |
-| Williams-Otto        | 3 + 2               | 2           | min  |
-| Small-Feasible-Region   | 1 + 1            | 2           | min  |
-| Small-Feasible-Region-2 | 1 + 1            | 2           | min  |
+### Published Paper (MATLAB code)
 
-## Acquisition Functions
+> Baldea, M. (2026). A multiscale Bayesian optimization framework for process and material codesign. *AIChE Journal*, 81. https://doi.org/10.1002/aic.70228
 
-| Name     | Description                                    |
-|----------|------------------------------------------------|
-| `ei`     | Expected Improvement (default)                 |
-| `pi`     | Probability of Improvement                     |
-| `lcb`    | Lower Confidence Bound                         |
-| `mwb2`   | Modified Watson-Barnes 2 (from COBALT paper)   |
-| `thompson` | Thompson Sampling                            |
+```bibtex
+@article{Baldea2026,
+  author  = {Baldea, Michael},
+  title   = {A Multiscale {B}ayesian Optimization Framework for Process and Material Codesign},
+  journal = {AIChE Journal},
+  year    = {2026},
+  volume  = {81},
+  doi     = {10.1002/aic.70228}
+}
+```
 
-## Running on TACC
+### Extended Benchmark Paper (Python code)
 
-```bash
-# Generate commands and SLURM script
-python tacc_generate_launcher_commands.py --allocation DDM25011
+> Hammond, J. E., Soderstrom, T. A., Korgel, B. A., & Baldea, M. (2026). [Title -- to be updated upon publication]. *Preprint*.
 
-# Submit to Lonestar6
-sbatch tacc_launch.slurm
-
-# After completion, merge results
-python tacc_gather_results.py --indir results_parallel --outdir results
+```bibtex
+@article{Hammond2026,
+  author  = {Hammond, Joshua E. and Soderstrom, Tyler A. and Korgel, Brian A. and Baldea, Michael},
+  title   = {[Title -- to be updated upon publication]},
+  journal = {[Journal -- to be updated]},
+  year    = {2026},
+  note    = {Preprint}
+}
 ```

@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+title: Hybrid Bayesian Optimization for Multiscale Process-Material Co-Design
+message: >-
+  If you use this software, please cite the applicable paper(s) below.
+type: software
+url: "https://github.com/Baldea-Group/HybridBayesianOptimization"
+references:
+  - type: article
+    title: "A Multiscale Bayesian Optimization Framework for Process and Material Codesign"
+    authors:
+      - family-names: Baldea
+        given-names: Michael
+        affiliation: "The University of Texas at Austin"
+    journal: "AIChE Journal"
+    volume: 81
+    year: 2026
+    doi: "10.1002/aic.70228"
+    scope: "Cite this paper if you use the MATLAB code in matlab/"
+  - type: article
+    title: "[Title -- to be updated upon publication]"
+    authors:
+      - family-names: Hammond
+        given-names: Joshua E.
+        affiliation: "The University of Texas at Austin"
+      - family-names: Soderstrom
+        given-names: Tyler A.
+        affiliation: "ExxonMobil Technology and Engineering"
+      - family-names: Korgel
+        given-names: Brian A.
+        affiliation: "The University of Texas at Austin"
+      - family-names: Baldea
+        given-names: Michael
+        affiliation: "The University of Texas at Austin"
+    year: 2026
+    scope: "Cite this paper if you use the Python code in python/"
