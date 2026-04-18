@@ -1,0 +1,183 @@
+
+\usepackage{soul}
+
+\newcommand{\re}[1]{\textcolor{blue}{#1}}
+\newcommand{\todo}[1]{\textcolor{red}{#1}}
+
+% ... number equations within sections
+\renewcommand{\theequation}{\thesection.\arabic{equation}}
+
+\newcommand{\amin}{\mathop{\mbox{argmin}}}
+\newcommand{\amax}{\mathop{\mbox{argmax}}}
+
+% taken from MB preamble + my edits in the last paper
+
+% abbreviations
+\renewcommand{\cal}{\mathcal}
+
+\newcommand{\beqn}{\begin{eqnarray}}
+\newcommand{\eeqn}{\end{eqnarray}}
+\newcommand{\bdm}{\begin{displaymath}}
+\newcommand{\edm}{\end{displaymath}}
+\newcommand{\be}{\begin{equation}}
+\newcommand{\ee}{\end{equation}}
+\newcommand{\ba}{\begin{array}}
+\newcommand{\ea}{\end{array}}
+\newcommand{\barr}{\ba}
+\newcommand{\earr}{\ea}
+\newcommand{\pa}{\partial}
+% \newcommand{\re}{\ref}
+\newcommand{\ci}{\cite}
+\newcommand{\la}{\label}
+\newcommand{\lr}{\leftrightarrow}
+\newcommand{\fr}{\frac}
+\newcommand{\ov}{\overline}
+% greek characters
+\newcommand{\al}{\alpha}
+\newcommand{\bt}{\beta}
+\newcommand{\de}{\delta}
+\newcommand{\De}{\Delta}
+\newcommand{\ga}{\gamma}
+\newcommand{\ka}{\kappa}
+\newcommand{\lb}{\lambda}
+\newcommand{\na}{\nabla}
+\newcommand{\om}{\omega}
+\newcommand{\Om}{\Omega}
+\newcommand{\si}{\sigma}
+\newcommand{\te}{\theta}
+% bold font
+\newcommand{\bbf}{{\bf \bar f}}
+\newcommand{\bfe}{{\bf e}}
+\newcommand{\bff}{{\bf f}}
+\newcommand{\bfF}{{\bf F}}
+\newcommand{\bfB}{{\bf B}}
+\newcommand{\bfC}{{\bf C}}
+\newcommand{\bfc}{{\bf c}}
+\newcommand{\bfG}{{\bf G}}
+\newcommand{\bfg}{{\bf g}}
+\newcommand{\bfh}{{\bf h}}
+\newcommand{\bfH}{{\bf H}}
+\newcommand{\bfI}{{\bf I}}
+\newcommand{\bfj}{{\bf j}}
+\newcommand{\bfk}{{\bf k}}
+\newcommand{\bfK}{{\bf K}}
+\newcommand{\bfL}{{\bf L}}
+\newcommand{\bfl}{{\bf l}}
+\newcommand{\bfo}{{\bf 0}}
+\newcommand{\bfp}{{\bf p}}
+\newcommand{\bfP}{{\bf P}}
+\newcommand{\bfQ}{{\bf Q}}
+\newcommand{\bfr}{{\bf r}}
+\newcommand{\bfR}{{\bf R}}
+\newcommand{\bfS}{{\bf S}}
+\newcommand{\bfx}{{\bf x}}
+\newcommand{\bfy}{{\bf y}}
+\newcommand{\bfz}{{\bf z}}
+\newcommand{\btf}{{\bf \tilde f}}
+\newcommand{\bfu}{{\bf u}}
+% mathfont
+\newcommand{\bmzeta}{{\bm {\zeta}}}
+\newcommand{\bmeta}{{\bm {\eta}}}
+\newcommand{\bmth}{{\bm \theta}}
+\newcommand{\bmj}{{\bm j}}
+\newcommand{\bmr}{{\bm \rho}}
+\newcommand{\bmz}{{\bm \zeta}}
+\newcommand{\bmg}{{\bm \gamma}}
+\newcommand{\bmG}{{\bm \Gamma}}
+\newcommand{\bmp}{{\bm \pi}}
+\newcommand{\bmf}{{\bm \phi}}
+% underlines
+\newcommand{\uT}{\und{T}}
+\newcommand{\ux}{\und{x}}
+\newcommand{\uX}{\und{X}}
+\newcommand{\ug}{\und{g}}
+\newcommand{\uf}{\und{f}}
+% cal/math misc
+\newcommand{\ovy}{\overline{Y}}
+\newcommand{\ar}{\leftrightarrow}
+\newcommand{\ri}{\rightarrow}
+\newcommand{\Lr}{\Longrightarrow}
+
+%\newcommand{\st}{\stackrel}
+\newcommand{\tocEF}{\st{{\cal E}_F}\lr}
+\newcommand{\tocM}{\st{{\cal M}}\lr}
+\newcommand{\tocF}{\st{{\cal F}}\lr}
+\newcommand{\toM}{\st{M}\lr}
+\newcommand{\ffi}{\varphi}
+\newcommand{\eps}{\varepsilon}
+
+\newcommand{\ds}{\displaystyle}
+\newcommand{\ti}{\tilde}
+\newcommand{\percent}{\%}
+\newcommand{\rhu}{\rightharpoonup}
+\newcommand{\und}{\underline}
+\newcommand{\non}{\nonumber}
+\newcommand{\dis}{\displaystyle}
+\newcommand{\deh} {\Delta H}
+\newcommand{\etz} {\eps \rightarrow 0}
+\newcommand{\oeps} {\cal{O}(\eps)}
+\newcommand{\oone} {{\cal{O}}(1)}
+\newcommand{\ooveo} {{\cal{O}}(\frac{1}{\eps})}
+\newcommand{\oove} {\frac{1}{\eps}}
+\newcommand{\ooveone} {\frac{1}{\eps_1}}
+\newcommand{\ooved}{\frac{1}{\eps_2}}
+\newcommand{\ooveu} {\frac{1}{\eps_1}}
+\newcommand{\doveu} {\frac{\eps_2}{\eps_1}}
+\newcommand{\lbr}{\left\lbrace}
+\newcommand{\rbr}{\right\rbrace}
+
+\newcommand{\cpl}{C_{p,l}}
+\newcommand{\cpv}{C_{p,v}}
+\newcommand{\cR}{\cal R}
+
+
+
+
+%\def\R{{\rm I\kern-.1567em R}}
+\def\R{{\rm I\kern-.19em R}}
+\def\M{{\rm I\kern-.1567em M}}
+\def\C{{\rm I\kern-.55em C}}
+\def\intp{{\rm \int{\hspace{-4mm}}-}}
+\def\tr{{\rm tr}}
+\def\Id {{\rm Id}}
+\def\div {{\rm div}}
+\def\sign {{\rm sign}}
+\def\spt{{\rm spt}}
+\def\dist{{\rm dist}}
+\def\eg{{\it e.g.,}~}
+\def\ie{{\it i.e.,}~}
+\def\Chi{{\raise.4ex\hbox{\large$\chi$}}}
+\def\Z{\cal{Z}}
+% \newtheorem{theorem}{Theorem}
+%\newtheorem{definition}{Definition}
+%\renewcommand{\thedefinition}{\arabic{chapter}.\arabic{definition}}
+%\newtheorem{deflem}[theorem]{Definition and Lemma}
+%\newtheorem{lemma}[theorem]{Lemma}
+%\newtheorem{example}[theorem]{Example}
+% \newtheorem{claim}[theorem]{Claim}
+% \newtheorem{example}[theorem]{Example}
+
+%\renewcommand{\theequation}{\thesection.\arabic{equation}}
+%\renewcommand{\thefigure}{\thesection.\arabic{figure}}
+%\renewcommand{\thetable}{\thesection.\arabic{table}}
+%\renewcommand{\thetheorem}{\thesection.\arabic{theorem}}
+%\renewcommand{\thedefinition}{\thesection.\arabic{definition}}
+%\renewcommand{\theremark}{\thesection.\arabic{remark}}
+%\renewcommand{\theassumption}{\thesection.\arabic{assumption}}
+
+%%% JEH additions
+% jacobian symbols
+\newcommand{\jac}[1]{\nabla_{#1} \bff}
+\newcommand{\gradloss}{\nabla_{\bmp} \mathcal{L}}
+\newcommand{\agradloss}{|\nabla_{\bmp} \mathcal{L}|}
+\newcommand{\TODO}[1]{\hl{TODO: #1}}
+\newcommand{\itemToDo}{\item [$\square$]}
+\newcommand{\itemDone}{\item [$\checkmark$]}
+\newcommand{\needscitation}{\hl{[citation needed]}}
+\newcommand{\subitemize}[1]{\begin{itemize}\item #1\end{itemize}}  % adds subelement to list
+\newcommand*\phantomsubfigure[1]{\begin{subfigure}[]{0pt}\caption{}\label{#1}\end{subfigure}}  % for subfigures when I only have one image file
+\newcommand{\tocite}[1]{\hl{(#1)}}
+
+% transfer learning specific
+\newcommand{\source}{\cal{S}}
+\newcommand{\target}{\cal{T}}
